@@ -7,17 +7,17 @@ from tkinter import ttk
 from collections import OrderedDict
 
 url_downloaded = []
-file_version = '2023.06.03.A'
+file_version = '2023.06.04.A'
 
 ################################################################################
 ################################################################################
 def download_html(url, max_retries=2, retry_delay=5):
     if url in url_downloaded:
-        send_status("\nNetwork: Downloaded Link Before: " + url)
+        #send_status("\nNetwork: Downloaded Link Before: " + url)
         return(0)
     else:
         url_downloaded.append(url)
-    send_status("\nNetwork: Downloading: " + url.rsplit("/", 1)[-1])
+    send_status("\nDownloading: " + url.rsplit("/", 1)[-1])
     retries = 0
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -29,17 +29,17 @@ def download_html(url, max_retries=2, retry_delay=5):
                 raw_html = response.text
                 return(raw_html)  # Exit the function after successful extraction
             else:
-                send_status("\nNetwork: Error: Failed to retrieve the web page. Status code " + str(response.status_code))
+                send_status("\nError: Failed to retrieve the web page. Status code " + str(response.status_code))
         except requests.exceptions.RequestException as e:
             send_status("\nError: An error occurred during the web page lookup")
 
         retries += 1
         if retries < max_retries:
-            message = "\nNetwork: Error: " + str(retries) + "Retrying in" + str(retry_delay) + "second(s)..."
+            message = "\nError: " + str(retries) + "Retrying in" + str(retry_delay) + "second(s)..."
             send_status(message)
             time.sleep(retry_delay)
 
-    send_status("\nNetwork: Error: Max number of retries reached. Unable to retrieve data.")
+    send_status("\nError: Max number of retries reached. Unable to retrieve data.")
     return(0)
 
 def text_search_extract(raw_html, pattern):
@@ -57,17 +57,13 @@ def write_to_file(output_file, combined_text):
 
     send_status("\nSaving: " + output_file)
     if os.path.exists(output_file):
-        #send_status("\nFile Exists: ")
         with open(output_file, "a", encoding='utf-8') as filea:
              filea.write(combined_text)
         filea.close()
     else:
-        #send_status("\nFile Does Not Exist: ")
         with open(output_file, 'w', encoding='utf-8') as filew:
             filew.write(combined_text)
         filew.close()
-
-    #send_status("Saved: " + output_file)
 
 ################################################################################
 ################################################################################
@@ -109,8 +105,6 @@ def get_story(url):
 
         #check for series
         story_series = text_search_extract(raw_html, r"https://www.literotica.com/series/se/(.*?)\"")
-        #if(story_series):
-            #send_status("\nNote: Story Series Found..." + story_series)
 
         story_page = format_body(story_body)
         story_header = url + "\n\n" + story_title + "\n" + story_author + "\n------------------------------\n"
@@ -119,10 +113,8 @@ def get_story(url):
         full_story = story_header + story_page
 
         url_page = 1
-        #send_status("\nNote: Searching for more pages." + story_nextpage)
         if story_nextpage:
             match = re.search(r"\d+$", story_nextpage)
-            #send_status("\nNote: Searching for more pages.")
         else:
             match = 0;
         while(match):
@@ -143,15 +135,15 @@ def get_story(url):
                 full_story = full_story + story_page
 
                 #check for series
-                story_series = text_search_extract(raw_html, r".com/series/se/(.*?)\"")
-                #if(story_series):
-                    #send_status("\nNote: Story Series Found..." + story_series)
+                #story_series = text_search_extract(raw_html, r".com/series/se/(.*?)\"")
             if not story_nextpage:
-                #send_status("\nNote: No more pages")
+                #check for series
+                story_series = text_search_extract(raw_html, r".com/series/se/(.*?)\"")
+                #Find Tags: class="av_as ">(.*?)</a>
+                #Find Series URL: https://www.literotica.com/series/se/(.*?)\"
                 break
 
             match = re.search(r"\d+$", story_nextpage)
-            #send_status("\nNote: Searching for more pages.")
     else:
         send_status("\nError: Continuing to next item.")
         return(0)
@@ -162,14 +154,12 @@ def get_story(url):
         raw_html = download_html(story_series_url)
         if(raw_html != 0):
             story_series_html = text_search_extract(raw_html, r"TABLE OF CONTENTS(.*?)</li></ul></div></div></div")
-            #send_status("\nNote: Seaarching for Series Links.")
             if story_series_html:
                 http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", story_series_html)
 
                 for link in http_links:
-                    #send_status(".")
-                    if link not in list_right.get(0, tk.END):
-                        link_title = link.rsplit("/", 1)[-1]
+                    link_title = link.rsplit("/", 1)[-1]
+                    if link_title not in list_right.get(0, tk.END):
                         list_right.insert(tk.END, link_title)
     full_story = full_story + "\n------------------------------\n   The End of \n        " + story_title + "\n\n------------------------------\n\n"
     return(full_story)
@@ -178,13 +168,13 @@ def process_url_list(list):
     send_status("\nNote: Downloading List.")
 
     title = ""
-    url_downloaded = []
+    url_downloaded.clear()
 
     for i in range(list.size()):
         current_url = list.get(i)
         story = get_story(current_url)
         if(story != 0):
-            send_status("\nCompleted Story URL..." + str(i + 1))
+            #send_status("\nCompleted Story URL..." + str(i + 1))
             #Sets the file name to the url story title(prevents overwriting)
             if(title == ""):
                 #Gets text after the last foward slash '/'
@@ -204,8 +194,7 @@ def send_status(status_text):
 def button_add_item():
     menu_left_add()
 
-def handle_button2():
-    send_status("\nDelete Button clicked!")
+def button_delete_item():
     menu_left_delete()
 
 def handle_button3():
@@ -214,7 +203,7 @@ def handle_button3():
 def handle_button4():
     send_status("\nButton 4 clicked!")
 
-def handle_button5():
+def button_clear_status():
     clear_status_text()
 
 def button_download(list):
@@ -222,7 +211,7 @@ def button_download(list):
 
 def menu_right_message():
     selected_index = list_right.get(tk.ACTIVE)
-    send_status("\nSomething: " + selected_index)
+    send_status("\nSomething Right: " + selected_index)
 
 def menu_right_delete():
     selection = list_right.curselection()
@@ -237,9 +226,12 @@ def menu_right_move():
         selected_index = list_right.get(tk.ACTIVE)
         list_left.insert(tk.END, "https://www.literotica.com/s/" + selected_index)
 
+def menu_right_clear():
+    list_right.delete(0, tk.END)
+
 def menu_left_message():
     selected_index = list_left.get(tk.ACTIVE)
-    send_status("\nSomething: " + selected_index)
+    send_status("\nSomething Left: " + selected_index)
 
 def menu_left_delete():
     selection = list_left.curselection()
@@ -261,21 +253,28 @@ def menu_left_add():
         text = entry.get()
         if text:
             list_left.insert(tk.END, text)
-            send_status("\nText added to the list.")
             input_window.destroy()
         else:
-            send_status("\nEmpty text nothing added.")
             input_window.destroy()
 
     # Create a save button to add the text to the list
-    save_button = tk.Button(input_window, text="Add Iten", command=save_text)
+    save_button = tk.Button(input_window, text="Add Item", command=save_text)
     save_button.pack(pady=5)
+
+def menu_left_clear():
+    list_left.delete(0, tk.END)
 
 def show_menu_left(event):
     menu_left.tk_popup(event.x_root, event.y_root)
 
+def key_left_delete(event):
+    menu_left_delete()
+
 def show_menu_right(event):
     menu_right.tk_popup(event.x_root, event.y_root)
+
+def key_right_delete(event):
+    menu_right_delete()
 
 def clear_status_text():
     status_box.config(state=tk.NORMAL)
@@ -292,15 +291,15 @@ window = tk.Tk()
 window.title("Main Menu")
 window.geometry("800x600")
 
+# Create a frame to hold the buttons
+frame_button = tk.Frame(window)
+frame_button.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
 # Create a frame to hold the Get URL List
 frame_list_left = tk.Frame(window)
 frame_list_left.pack(side=tk.LEFT, fill=tk.Y, padx=0, pady=0)
 # Create a frame to hold the Get URL List
 frame_list_right = tk.Frame(window)
-frame_list_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=0, pady=0)
-# Create a frame to hold the buttons
-frame_button = tk.Frame(window)
-frame_button.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
+frame_list_right.pack(side=tk.RIGHT, fill=tk.Y, padx=0, pady=0)
 # Create a frame to Status box and Scrollbar
 frame_status = tk.Frame(window)
 frame_status.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=0, pady=0)
@@ -309,29 +308,39 @@ frame_status_scrollbar = tk.Frame(frame_status)
 frame_status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=0, pady=0)
 
 # Create the list on the left
-list_left = tk.Listbox(frame_list_left)
-list_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+list_left = tk.Listbox(frame_list_left, width=30)
+list_left.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 #list_left.insert(tk.END, "Some URL")
 
+# Add a horizontal scrollbar to the left list box
+list_left_scrollbar = ttk.Scrollbar(frame_list_left, orient=tk.HORIZONTAL, command=list_left.xview)
+list_left_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+list_left.config(xscrollcommand=list_left_scrollbar.set)
+
 # Create the list on the right
-list_right = tk.Listbox(frame_list_right)
-list_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+list_right = tk.Listbox(frame_list_right, width=40)
+list_right.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 #list_right.insert(tk.END, "Some story name")
+
+# Add a horizontal scrollbar to the right list box
+list_right_scrollbar = ttk.Scrollbar(frame_list_right, orient=tk.HORIZONTAL, command=list_right.xview)
+list_right_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+list_right.config(xscrollcommand=list_right_scrollbar.set)
 
 # Create buttons and assign actions
 button_add_item = ttk.Button(frame_button, text="Add Item", command=button_add_item)
 button_add_item.pack(side=tk.LEFT, padx=5)
 
-button2 = ttk.Button(frame_button, text="Delete Item", command=handle_button2)
+button2 = ttk.Button(frame_button, text="Delete Item", command=button_delete_item)
 button2.pack(side=tk.LEFT, padx=5)
 
-button3 = ttk.Button(frame_button, text="Button 3", command=handle_button3)
-button3.pack(side=tk.LEFT, padx=5)
+#button3 = ttk.Button(frame_button, text="Button 3", command=handle_button3)
+#button3.pack(side=tk.LEFT, padx=5)
 
-button4 = ttk.Button(frame_button, text="Button 4", command=handle_button4)
-button4.pack(side=tk.LEFT, padx=5)
+#button4 = ttk.Button(frame_button, text="Button 4", command=handle_button4)
+#button4.pack(side=tk.LEFT, padx=5)
 
-button5 = ttk.Button(frame_button, text="Clear Status Log", command=handle_button5)
+button5 = ttk.Button(frame_button, text="Clear Status Log", command=button_clear_status)
 button5.pack(side=tk.LEFT, padx=5)
 
 button6 = ttk.Button(frame_button, text="Download", command=lambda: button_download(list_left))
@@ -343,25 +352,31 @@ status_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 status_box.config(state=tk.DISABLED)
 
 # Add a vertical scrollbar to the status box
-scrollbar = ttk.Scrollbar(frame_status_scrollbar, orient=tk.VERTICAL, command=status_box.yview)
-scrollbar.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
-status_box.config(yscrollcommand=scrollbar.set)
+status_scrollbar = ttk.Scrollbar(frame_status_scrollbar, orient=tk.VERTICAL, command=status_box.yview)
+status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
+status_box.config(yscrollcommand=status_scrollbar.set)
 
 # Create a right-click menu for left list
 menu_left = tk.Menu(window, tearoff=0)
 menu_left.add_command(label="Do Something", command=menu_left_message)
 menu_left.add_command(label="Add Item", command=menu_left_add)
 menu_left.add_command(label="Delete Item", command=menu_left_delete)
+menu_left.add_command(label="Clear List", command=menu_left_clear)
 
 # Create a right-click menu for right list
 menu_right = tk.Menu(window, tearoff=0)
 menu_right.add_command(label="Do Something", command=menu_right_message)
 menu_right.add_command(label="Add to List", command=menu_right_move)
-menu_right.add_command(label="Delete Item", command=menu_left_delete)
+menu_right.add_command(label="Delete Item", command=menu_right_delete)
+menu_right.add_command(label="Clear List", command=menu_right_clear)
 
 # Bind the right-click event to the listbox
 list_left.bind("<Button-3>", show_menu_left)
+list_left.bind("<Delete>", key_left_delete)
+
 list_right.bind("<Button-3>", show_menu_right)
+list_right.bind("<Delete>", key_left_delete)
+#list_right.bind("<Double-Button-1>", menu_right_move)
 
 # Start the GUI event loop
 window.mainloop()
