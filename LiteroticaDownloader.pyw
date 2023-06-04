@@ -7,7 +7,7 @@ from tkinter import ttk
 from collections import OrderedDict
 
 url_downloaded = []
-file_version = '2023.06.04.A'
+file_version = '2023.06.04.B'
 
 ################################################################################
 ################################################################################
@@ -95,6 +95,8 @@ def get_story(url):
     story_title = ""
 
     if raw_html:
+        #Look for links to stories
+        list_right_add_story(raw_html)
         #Gets all the parts of the story and formats it. Then gets the next part if its multipage.
         story_title = text_search_extract(raw_html, r"<h1 class=\"j_bm headline j_eQ\">(.*?)</h1>")
         story_title = story_title.replace("&#x27;", "\'")
@@ -119,6 +121,7 @@ def get_story(url):
             match = 0;
         while(match):
             send_status(".")
+            list_right_add_story(raw_html)
             url_page = url_page + 1
             if url_page >= 25:
                 send_status("\nError: Found more than 25 Pages? Is that true?")
@@ -150,17 +153,8 @@ def get_story(url):
 
     if story_series:
         story_series_url = "https://www.literotica.com/series/se/" + story_series
+        list_right_add_story(download_html(story_series_url))
 
-        raw_html = download_html(story_series_url)
-        if(raw_html != 0):
-            story_series_html = text_search_extract(raw_html, r"TABLE OF CONTENTS(.*?)</li></ul></div></div></div")
-            if story_series_html:
-                http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", story_series_html)
-
-                for link in http_links:
-                    link_title = link.rsplit("/", 1)[-1]
-                    if link_title not in list_right.get(0, tk.END):
-                        list_right.insert(tk.END, link_title)
     full_story = full_story + "\n------------------------------\n   The End of \n        " + story_title + "\n\n------------------------------\n\n"
     return(full_story)
 
@@ -183,6 +177,25 @@ def process_url_list(list):
 
 ################################################################################
 ################################################################################
+def find_stories(link):
+    #send_status("\nFinding Stories")
+    list_right_add_story(download_html(link))
+
+def list_right_add_story(raw_html):
+    #send_status("\nFinding Stories2")
+    match = "https://www.literotica.com/s/"
+
+    if(raw_html != 0):
+        http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", raw_html)
+        #send_status("\nFinding Links.")
+        for link in http_links:
+            #send_status("\nFinding Links."+link)
+            if link.startswith(match):
+                link_story = link.rsplit("/", 1)[-1]
+                if link_story not in list_right.get(0, tk.END):
+                    list_right.insert(tk.END, link_story)
+################################################################################
+################################################################################
 
 def send_status(status_text):
     status_box.config(state=tk.NORMAL)
@@ -200,18 +213,15 @@ def button_delete_item():
 def handle_button3():
     send_status("\nButton 3 clicked!")
 
-def handle_button4():
-    send_status("\nButton 4 clicked!")
+def button_find_stories():
+    #https://www.literotica.com/stories/new_submissions.php
+    find_stories("https://www.literotica.com/stories/new_submissions.php")
 
 def button_clear_status():
     clear_status_text()
 
 def button_download(list):
     process_url_list(list)
-
-def menu_right_message():
-    selected_index = list_right.get(tk.ACTIVE)
-    send_status("\nSomething Right: " + selected_index)
 
 def menu_right_delete():
     selection = list_right.curselection()
@@ -228,10 +238,6 @@ def menu_right_move():
 
 def menu_right_clear():
     list_right.delete(0, tk.END)
-
-def menu_left_message():
-    selected_index = list_left.get(tk.ACTIVE)
-    send_status("\nSomething Left: " + selected_index)
 
 def menu_left_delete():
     selection = list_left.curselection()
@@ -337,8 +343,8 @@ button2.pack(side=tk.LEFT, padx=5)
 #button3 = ttk.Button(frame_button, text="Button 3", command=handle_button3)
 #button3.pack(side=tk.LEFT, padx=5)
 
-#button4 = ttk.Button(frame_button, text="Button 4", command=handle_button4)
-#button4.pack(side=tk.LEFT, padx=5)
+button_find_stories = ttk.Button(frame_button, text="Get New Stories", command=button_find_stories)
+button_find_stories.pack(side=tk.LEFT, padx=5)
 
 button5 = ttk.Button(frame_button, text="Clear Status Log", command=button_clear_status)
 button5.pack(side=tk.LEFT, padx=5)
@@ -358,14 +364,12 @@ status_box.config(yscrollcommand=status_scrollbar.set)
 
 # Create a right-click menu for left list
 menu_left = tk.Menu(window, tearoff=0)
-menu_left.add_command(label="Do Something", command=menu_left_message)
 menu_left.add_command(label="Add Item", command=menu_left_add)
 menu_left.add_command(label="Delete Item", command=menu_left_delete)
 menu_left.add_command(label="Clear List", command=menu_left_clear)
 
 # Create a right-click menu for right list
 menu_right = tk.Menu(window, tearoff=0)
-menu_right.add_command(label="Do Something", command=menu_right_message)
 menu_right.add_command(label="Add to List", command=menu_right_move)
 menu_right.add_command(label="Delete Item", command=menu_right_delete)
 menu_right.add_command(label="Clear List", command=menu_right_clear)
