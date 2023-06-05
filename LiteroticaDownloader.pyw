@@ -6,8 +6,10 @@ import tkinter as tk
 from tkinter import ttk
 from collections import OrderedDict
 
+#Future Variable to allow it to save downloaded pages to prevent hitting site too many times.
+temp_folder = "temp"
 url_downloaded = []
-file_version = '2023.06.04.B'
+file_version = '2023.06.04.C'
 
 ################################################################################
 ################################################################################
@@ -17,7 +19,7 @@ def download_html(url, max_retries=2, retry_delay=5):
         return(0)
     else:
         url_downloaded.append(url)
-    send_status("\nDownloading: " + url.rsplit("/", 1)[-1])
+    #send_status("\nDownloading: " + url.rsplit("/", 1)[-1])
     retries = 0
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -50,20 +52,20 @@ def text_search_extract(raw_html, pattern):
             return(extracted_text)  # Exit the function after successful extraction
     return(0)
 
-#Writes text to file, creates new file if none exists, otherwise appends
+#Writes text to file creates new file or overrites
 def write_to_file(output_file, combined_text):
     if not output_file.endswith(".txt"):
         output_file = output_file + ".txt"
 
     send_status("\nSaving: " + output_file)
-    if os.path.exists(output_file):
-        with open(output_file, "a", encoding='utf-8') as filea:
-             filea.write(combined_text)
-        filea.close()
-    else:
-        with open(output_file, 'w', encoding='utf-8') as filew:
-            filew.write(combined_text)
-        filew.close()
+    #if os.path.exists(output_file):
+    #    with open(output_file, "a", encoding='utf-8') as filea:
+    #         filea.write(combined_text)
+    #    filea.close()
+    #else:
+    with open(output_file, 'w', encoding='utf-8') as filew:
+        filew.write(combined_text)
+    filew.close()
 
 ################################################################################
 ################################################################################
@@ -93,6 +95,7 @@ def get_story(url):
     raw_html = download_html(url)
     story_series = ""
     story_title = ""
+    story_tags = []
 
     if raw_html:
         #Look for links to stories
@@ -112,13 +115,17 @@ def get_story(url):
         story_header = url + "\n\n" + story_title + "\n" + story_author + "\n------------------------------\n"
 
         #puts story together
-        full_story = story_header + story_page
+        full_story = story_page
 
         url_page = 1
         if story_nextpage:
             match = re.search(r"\d+$", story_nextpage)
         else:
             match = 0;
+
+        #Find Tags:
+        story_tags = get_tags(story_tags, raw_html)
+
         while(match):
             send_status(".")
             list_right_add_story(raw_html)
@@ -137,12 +144,10 @@ def get_story(url):
                 story_page = format_body(story_body)
                 full_story = full_story + story_page
 
-                #check for series
-                #story_series = text_search_extract(raw_html, r".com/series/se/(.*?)\"")
             if not story_nextpage:
                 #check for series
                 story_series = text_search_extract(raw_html, r".com/series/se/(.*?)\"")
-                #Find Tags: class="av_as ">(.*?)</a>
+                story_tags = get_tags(story_tags, raw_html)
                 #Find Series URL: https://www.literotica.com/series/se/(.*?)\"
                 break
 
@@ -155,14 +160,20 @@ def get_story(url):
         story_series_url = "https://www.literotica.com/series/se/" + story_series
         list_right_add_story(download_html(story_series_url))
 
-    full_story = full_story + "\n------------------------------\n   The End of \n        " + story_title + "\n\n------------------------------\n\n"
+    tags_string = "\nTags: "
+    story_tags = sorted(story_tags)
+    for tag in story_tags:
+        tags_string = tags_string + tag + ", "
+    tags_string = tags_string[:-2]
+    full_story = story_header + tags_string + "\n------------------------------\n" + full_story + "\n------------------------------\n   The End of \n        " + story_title + "\n\n------------------------------\n\n"
     return(full_story)
 
 def process_url_list(list):
-    send_status("\nNote: Downloading List.")
+    #send_status("\nNote: Downloading List.")
 
     title = ""
     url_downloaded.clear()
+    all_pages = ""
 
     for i in range(list.size()):
         current_url = list.get(i)
@@ -173,7 +184,29 @@ def process_url_list(list):
             if(title == ""):
                 #Gets text after the last foward slash '/'
                 title = current_url.rsplit("/", 1)[-1]
-            write_to_file(title, story)
+            #Saving pages up to write all at once at the end.
+            all_pages = all_pages + story
+    write_to_file(title, all_pages)
+    send_status("\n" + all_pages)
+
+def get_tags(tags, raw_html):
+    #tags_raw = text_search_extract(html, r"class=\"av_as \">(.*?)</a></div></div>")
+
+    #send_status(html)
+
+    #Try first pattern....
+    pattern = r'av_as av_r\">(.*?)</a>'
+    tags_temp = re.findall(pattern, raw_html)
+    if not tags_temp:
+        #Try second pattern...
+        pattern = r'av_as\">(.*?)</a>'
+        tags_temp = re.findall(pattern, raw_html)
+    send_status("\n Tags: ")
+    for text in tags_temp:
+        if text not in tags:
+            send_status(text + ", ")
+            tags.append(text)
+    return(tags)
 
 ################################################################################
 ################################################################################
@@ -275,6 +308,9 @@ def show_menu_left(event):
 
 def key_left_delete(event):
     menu_left_delete()
+
+def mouse_right_move(event):
+    menu_right_move()
 
 def show_menu_right(event):
     menu_right.tk_popup(event.x_root, event.y_root)
@@ -379,8 +415,8 @@ list_left.bind("<Button-3>", show_menu_left)
 list_left.bind("<Delete>", key_left_delete)
 
 list_right.bind("<Button-3>", show_menu_right)
-list_right.bind("<Delete>", key_left_delete)
-#list_right.bind("<Double-Button-1>", menu_right_move)
+list_right.bind("<Delete>", key_right_delete)
+list_right.bind("<Double-Button-1>", mouse_right_move)
 
 # Start the GUI event loop
 window.mainloop()
