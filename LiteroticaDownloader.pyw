@@ -11,7 +11,7 @@ temp_folder = "temp"
 url_downloaded = []
 global configuration
 configuration = {}
-file_version = '2023.06.16.A'
+file_version = '2023.06.16.B'
 
 ################################################################################
 #               Data Retrieval and Storing
@@ -143,7 +143,7 @@ def get_story(url):
             send_status(".")
             list_right_add_story(raw_html)
             url_page = url_page + 1
-            if url_page >= configuration["error_max_pages"]:
+            if url_page >= int(configuration["error_max_pages"]):
                 send_status("\nError: Found more than " + configuration["error_max_pages"] +" change config file to override.")
                 break
 
