@@ -1,26 +1,34 @@
-import os
 import re
+import os
 import time
 import requests
 import tkinter as tk
 from tkinter import ttk
 from collections import OrderedDict
 
-#Future Variable to allow it to save downloaded pages to prevent hitting site too many times.
+#Future Variable to allow it to save downloaded pages to prevent hitting site to hard.
 temp_folder = "temp"
 url_downloaded = []
-file_version = '2023.06.04.C'
+global configuration
+configuration = {}
+file_version = '2023.06.16.A'
 
 ################################################################################
+#               Data Retrieval and Storing
 ################################################################################
 def download_html(url, max_retries=2, retry_delay=5):
     if url in url_downloaded:
-        #send_status("\nNetwork: Downloaded Link Before: " + url)
+        #Downloaded once this session already
+        #Plan to add a feature that downloads and saves each page.
+        #If it hits this condition it will go look for the saved version.
+        #For now it just returns a failure.
         return(0)
     else:
+        if(configuration["display_dowload_url"] == "1"):
+            send_status("\nDownloading Page: " + url)
         url_downloaded.append(url)
-    #send_status("\nDownloading: " + url.rsplit("/", 1)[-1])
     retries = 0
+    #Lets site know we just want a regular webpage returned.
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
@@ -29,7 +37,7 @@ def download_html(url, max_retries=2, retry_delay=5):
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
                 raw_html = response.text
-                return(raw_html)  # Exit the function after successful extraction
+                return(raw_html)
             else:
                 send_status("\nError: Failed to retrieve the web page. Status code " + str(response.status_code))
         except requests.exceptions.RequestException as e:
@@ -37,8 +45,7 @@ def download_html(url, max_retries=2, retry_delay=5):
 
         retries += 1
         if retries < max_retries:
-            message = "\nError: " + str(retries) + "Retrying in" + str(retry_delay) + "second(s)..."
-            send_status(message)
+            send_status("\nError: " + str(retries) + " Retrying in " + str(retry_delay) + " second(s)...")
             time.sleep(retry_delay)
 
     send_status("\nError: Max number of retries reached. Unable to retrieve data.")
@@ -49,48 +56,54 @@ def text_search_extract(raw_html, pattern):
         matches = re.findall(pattern, raw_html, re.DOTALL)
         if matches:
             extracted_text = matches[0].strip()
-            return(extracted_text)  # Exit the function after successful extraction
+            return(extracted_text)
     return(0)
 
-#Writes text to file creates new file or overrites
+#Writes text to file, creates new file or overrites
 def write_to_file(output_file, combined_text):
     if not output_file.endswith(".txt"):
         output_file = output_file + ".txt"
 
-    send_status("\nSaving: " + output_file)
-    #if os.path.exists(output_file):
-    #    with open(output_file, "a", encoding='utf-8') as filea:
-    #         filea.write(combined_text)
-    #    filea.close()
-    #else:
+    if(configuration["display_saved_file"] == "1"):
+        send_status("\nSaving: " + output_file)
     with open(output_file, 'w', encoding='utf-8') as filew:
         filew.write(combined_text)
     filew.close()
 
-################################################################################
-################################################################################
+def config_load(config_file="LiteroticaDownloader.config"):
+    if not os.path.exists(config_file):
+        new_config_file(config_file)
+    config = {}
+    with open(config_file, "r") as file:
+        for line in file:
+            key, value = line.strip().split("=")
+            config[key] = value
+    file.close
+    return(config)
 
-#Removes extra html formating. Im sure there are more that exist or an easier way.
-def format_body(TextBody):
-    #Removes html formating
-    TextBody = TextBody.replace("<p align=\"center\">", "\n")
-    TextBody = TextBody.replace("<p>", "\n")
-    TextBody = TextBody.replace("</p>", "\n")
-    TextBody = TextBody.replace("<br>", "\n")
-    TextBody = TextBody.replace("<div class=\"aa_ht\">", "")
-    TextBody = TextBody.replace("&#x27;", "\'")
-    TextBody = TextBody.replace("<div>", "")
-    TextBody = TextBody.replace("</div>", "")
-    TextBody = TextBody.replace("<strong>", "")
-    TextBody = TextBody.replace("</strong>", "")
-    TextBody = TextBody.replace("<b>", "")
-    TextBody = TextBody.replace("</b>", "")
-    TextBody = TextBody.replace("<i>", "")
-    TextBody = TextBody.replace("</i>", "")
-    TextBody = TextBody.replace("<em>", "")
-    TextBody = TextBody.replace("</em>", "")
-    return(TextBody)
+def config_save(config_file="LiteroticaDownloader.config"):
+    with open(config_file, "w") as file:
+        for key, value in configuration.items():
+            file.write(f"{key}={value}\n")
+    file.close
 
+def new_config_file(config_file="LiteroticaDownloader.config"):
+    config = {
+        "display_dowload_url": 1,
+        "display_saved_file": 1,
+        "display_story_after_save": 1,
+        "display_story_tags": 1,
+        "error_max_pages": 25,
+        "temp_folder": "temp"
+    }
+    with open(config_file, "w") as file:
+        for key, value in config.items():
+            file.write(f"{key}={value}\n")
+    file.close
+
+################################################################################
+#               Main Story/Page Organizers
+################################################################################
 def get_story(url):
     raw_html = download_html(url)
     story_series = ""
@@ -114,7 +127,7 @@ def get_story(url):
         story_page = format_body(story_body)
         story_header = url + "\n\n" + story_title + "\n" + story_author + "\n------------------------------\n"
 
-        #puts story together
+        #Stores first page to main variable.
         full_story = story_page
 
         url_page = 1
@@ -130,8 +143,8 @@ def get_story(url):
             send_status(".")
             list_right_add_story(raw_html)
             url_page = url_page + 1
-            if url_page >= 25:
-                send_status("\nError: Found more than 25 Pages? Is that true?")
+            if url_page >= configuration["error_max_pages"]:
+                send_status("\nError: Found more than " + configuration["error_max_pages"] +" change config file to override.")
                 break
 
             if(int(match.group()) == url_page):
@@ -142,6 +155,7 @@ def get_story(url):
                 story_body = text_search_extract(raw_html, r"<div class=\"panel article aa_eQ\">(.*?)</div>")
                 story_nextpage = text_search_extract(raw_html, r"title=\"Next Page\" href=\"(.*?)\"><i class=\"")
                 story_page = format_body(story_body)
+                #Adds current page to main story variable.
                 full_story = full_story + story_page
 
             if not story_nextpage:
@@ -161,16 +175,15 @@ def get_story(url):
         list_right_add_story(download_html(story_series_url))
 
     tags_string = "\nTags: "
-    story_tags = sorted(story_tags)
     for tag in story_tags:
         tags_string = tags_string + tag + ", "
     tags_string = tags_string[:-2]
+    if(configuration["display_story_tags"] == "1"):
+        send_status(tags_string)
     full_story = story_header + tags_string + "\n------------------------------\n" + full_story + "\n------------------------------\n   The End of \n        " + story_title + "\n\n------------------------------\n\n"
     return(full_story)
 
 def process_url_list(list):
-    #send_status("\nNote: Downloading List.")
-
     title = ""
     url_downloaded.clear()
     all_pages = ""
@@ -179,7 +192,6 @@ def process_url_list(list):
         current_url = list.get(i)
         story = get_story(current_url)
         if(story != 0):
-            #send_status("\nCompleted Story URL..." + str(i + 1))
             #Sets the file name to the url story title(prevents overwriting)
             if(title == ""):
                 #Gets text after the last foward slash '/'
@@ -187,13 +199,13 @@ def process_url_list(list):
             #Saving pages up to write all at once at the end.
             all_pages = all_pages + story
     write_to_file(title, all_pages)
-    send_status("\n" + all_pages)
+    if(configuration["display_story_after_save"] == "1"):
+        send_status("\n" + all_pages)
 
+################################################################################
+#               Data Formatting/Conditioning
+################################################################################
 def get_tags(tags, raw_html):
-    #tags_raw = text_search_extract(html, r"class=\"av_as \">(.*?)</a></div></div>")
-
-    #send_status(html)
-
     #Try first pattern....
     pattern = r'av_as av_r\">(.*?)</a>'
     tags_temp = re.findall(pattern, raw_html)
@@ -201,33 +213,49 @@ def get_tags(tags, raw_html):
         #Try second pattern...
         pattern = r'av_as\">(.*?)</a>'
         tags_temp = re.findall(pattern, raw_html)
-    send_status("\n Tags: ")
     for text in tags_temp:
+        #if tags found before, unlikely, dont duplicate them.
         if text not in tags:
-            send_status(text + ", ")
             tags.append(text)
+    tags = sorted(tags)
     return(tags)
 
-################################################################################
-################################################################################
 def find_stories(link):
-    #send_status("\nFinding Stories")
     list_right_add_story(download_html(link))
 
 def list_right_add_story(raw_html):
-    #send_status("\nFinding Stories2")
     match = "https://www.literotica.com/s/"
 
     if(raw_html != 0):
         http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", raw_html)
-        #send_status("\nFinding Links.")
         for link in http_links:
-            #send_status("\nFinding Links."+link)
             if link.startswith(match):
                 link_story = link.rsplit("/", 1)[-1]
                 if link_story not in list_right.get(0, tk.END):
                     list_right.insert(tk.END, link_story)
+
+#Removes extra html formating. Im sure there are more that exist or an easier way.
+def format_body(TextBody):
+    #Removes html formating
+    TextBody = TextBody.replace("<p align=\"center\">", "\n")
+    TextBody = TextBody.replace("<p>", "\n")
+    TextBody = TextBody.replace("</p>", "\n")
+    TextBody = TextBody.replace("<br>", "\n")
+    TextBody = TextBody.replace("<div class=\"aa_ht\">", "")
+    TextBody = TextBody.replace("&#x27;", "\'")
+    TextBody = TextBody.replace("<div>", "")
+    TextBody = TextBody.replace("</div>", "")
+    TextBody = TextBody.replace("<strong>", "")
+    TextBody = TextBody.replace("</strong>", "")
+    TextBody = TextBody.replace("<b>", "")
+    TextBody = TextBody.replace("</b>", "")
+    TextBody = TextBody.replace("<i>", "")
+    TextBody = TextBody.replace("</i>", "")
+    TextBody = TextBody.replace("<em>", "")
+    TextBody = TextBody.replace("</em>", "")
+    return(TextBody)
 ################################################################################
+#                GUI Handlers
 ################################################################################
 
 def send_status(status_text):
@@ -322,15 +350,15 @@ def clear_status_text():
     status_box.config(state=tk.NORMAL)
     status_box.delete("1.0", tk.END)
     status_box.config(state=tk.DISABLED)
+################################################################################
+#               GUI Layout
+################################################################################
+# Load Confige file
+configuration = config_load()
 
-################################################################################
-################################################################################
-
-################################################################################
-################################################################################
 # Create the GUI window
 window = tk.Tk()
-window.title("Main Menu")
+window.title("Web Text Extractor")
 window.geometry("800x600")
 
 # Create a frame to hold the buttons
@@ -417,6 +445,9 @@ list_left.bind("<Delete>", key_left_delete)
 list_right.bind("<Button-3>", show_menu_right)
 list_right.bind("<Delete>", key_right_delete)
 list_right.bind("<Double-Button-1>", mouse_right_move)
+
+# Bind the closing event to a function
+#window.protocol("WM_DELETE_WINDOW", on_closing)
 
 # Start the GUI event loop
 window.mainloop()
