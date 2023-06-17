@@ -11,7 +11,7 @@ temp_folder = "temp"
 url_downloaded = []
 global configuration
 configuration = {}
-file_version = '2023.06.16.B'
+file_version = '2023.06.16.C'
 
 ################################################################################
 #               Data Retrieval and Storing
@@ -48,7 +48,7 @@ def download_html(url, max_retries=2, retry_delay=5):
             send_status("\nError: " + str(retries) + " Retrying in " + str(retry_delay) + " second(s)...")
             time.sleep(retry_delay)
 
-    send_status("\nError: Max number of retries reached. Unable to retrieve data.")
+    send_status("\nError: Max number of retries reached. Unable to retrieve data. " + url)
     return(0)
 
 def text_search_extract(raw_html, pattern):
@@ -160,7 +160,7 @@ def get_story(url):
 
             if not story_nextpage:
                 #check for series
-                story_series = text_search_extract(raw_html, r".com/series/se/(.*?)\"")
+                story_series = text_search_extract(raw_html, r"www.literotica.com/series/se/(.*?)\"")
                 story_tags = get_tags(story_tags, raw_html)
                 #Find Series URL: https://www.literotica.com/series/se/(.*?)\"
                 break
@@ -225,14 +225,17 @@ def find_stories(link):
 
 def list_right_add_story(raw_html):
     match = "https://www.literotica.com/s/"
+    black_list = ["comment","feedback"]
 
     if(raw_html != 0):
         http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", raw_html)
         for link in http_links:
+            #send_status("\n --- " + link)
             if link.startswith(match):
-                link_story = link.rsplit("/", 1)[-1]
-                if link_story not in list_right.get(0, tk.END):
-                    list_right.insert(tk.END, link_story)
+                if link.rsplit("/", 2)[-2] == "s": #matches URL previous directory, makes sure this is a story and not a feedack/comment/etc.
+                        link_story = link.rsplit("/", 1)[-1]
+                        if link_story not in list_right.get(0, tk.END):
+                            list_right.insert(tk.END, link_story)
 
 #Removes extra html formating. Im sure there are more that exist or an easier way.
 def format_body(TextBody):

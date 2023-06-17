@@ -11,17 +11,15 @@ I dont know what I want this to be. I didnt think it would be so easy to parse a
 
 Im already re-written some of the GUI to have some better layout, but I havent pushed it because I'm thinking I want to re-design again to work on mobile devices. Python is new to me, not that Im an expert in any language, but maybe I will even change languages.
 
-Issues:
+Some Known Issues:
 
-1. It finds some links and adds them to list incorrectly
-   - (I messed up a few lines of code.)
-2. It has trouble finding parts of stories if you start on the last part of the story
+1. It has trouble finding parts of stories if you start on the last part of the story
    - (This will be address/fixed when I work on possible network abuses.)
-3. The interface looks lame.
+2. The interface looks lame.
    - (Working on it)
-4. The author is a script kiddie.
+3. The author is a script kiddie.
    - (No fix possible.)
-5. Obvious netork abuse possible.
+4. Obvious netork abuse possible.
    - (Plan to make it work from cache if its less than 24 hours old.)
-6. Make code look and act clean
+5. Make code look and act clean
    - (Its very dirty. Refer to issue 4)
