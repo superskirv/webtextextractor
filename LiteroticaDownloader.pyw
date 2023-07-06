@@ -1,456 +1,433 @@
-import re
-import os
-import time
-import requests
 import tkinter as tk
 from tkinter import ttk
-from collections import OrderedDict
+from tkinter import filedialog
+import threading
+import time
+import requests
+import re
 
-#Future Variable to allow it to save downloaded pages to prevent hitting site to hard.
-temp_folder = "temp"
-url_downloaded = []
-global configuration
-configuration = {}
-file_version = '2023.06.16.C'
+file_version = '2023.07.05.A'
 
-################################################################################
-#               Data Retrieval and Storing
-################################################################################
-def download_html(url, max_retries=2, retry_delay=5):
-    if url in url_downloaded:
-        #Downloaded once this session already
-        #Plan to add a feature that downloads and saves each page.
-        #If it hits this condition it will go look for the saved version.
-        #For now it just returns a failure.
-        return(0)
-    else:
-        if(configuration["display_dowload_url"] == "1"):
-            send_status("\nDownloading Page: " + url)
-        url_downloaded.append(url)
-    retries = 0
-    #Lets site know we just want a regular webpage returned.
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-    }
-    while retries < max_retries:
-        try:
-            response = requests.get(url, headers=headers)
-            if response.status_code == 200:
-                raw_html = response.text
-                return(raw_html)
+#################################################
+##           Reqexp Formulas Setup
+#################################################
+regexp_title =      r"<h1 class=\"j_bm headline j_eQ\">(.*?)</h1>"
+regexp_title_alt =  r"<h1 class=\"j_bm headline j_eQ \">(.*?)</h1>"
+regexp_series_page = r"\"https://www.literotica.com/series/se/(.*?)\" class=\"bn_av\""
+regexp_series_pages_bulk = r"<ul class=\"series__works\">(.*?)</ul>"
+
+regexp_author =     r"class=\"y_eU \" title=\"(.*?)\">" # class="y_eU" title="Ran_dom_Guy">
+regexp_author_alt = r"class=\"y_eU\" title=\"(.*?)\">" # class="y_eR" title="Ran_dom_Guy">
+
+regexp_tag_bulk = r'<div class=\"bn_Q bn_ar\">(.*?)</div>'
+regexp_tag_single =         r" class=\"av_as av_r\">(.*?)</a>"
+#regexp_tag_single_alt =    r" class=\"av_as \"(.*?)</a>" #unused.
+regexp_story_page = r"<div class=\"panel article aa_eQ\">(.*?)</div>"
+regexp_next_page = r"title=\"Next Page\" href=\"(.*?)\"><i class=\""
+
+
+#################################################
+##           Class Element Setup
+#################################################
+# Future/Better way to look up html elements
+# Will probably convert to using this as changes occur.
+#element_title = "j_bm headline j_eQ"
+#element_series_page = "bn_av"
+#element_series_pages_bulk = "series__works"
+
+#element_author = "y_eU"
+#element_tags = "av_as av_r"
+#element_story_page = "panel article aa_eQ"
+#element_next_page = "l_bJ l_bL"
+
+global message_logs
+message_logs = {}
+#################################################
+##           Thread Actions Setup
+#################################################
+class DownloadThread(threading.Thread):
+    semaphore = threading.Semaphore(1)  # Set maximum number of allowed threads
+
+    def __init__(self, que_id, item_id, queued_actions, message_logs):
+        threading.Thread.__init__(self)
+        self.que_id = que_id
+        self.item_id = item_id
+        self.queued_actions = queued_actions
+        self.stopped = False
+        self.message_logs = message_logs
+
+    def set_status(self, status="Error", msg="No Msg", delay=0.5):
+        if msg == "No Msg" and status != "Error":
+            msg = status
+            status = "Old Format"
+
+        #self.message_logs[item_id]['que_table'][0] = "Processing"
+        self.message_logs[self.item_id]['que_table'] = (status, *self.message_logs[self.item_id]['que_table'][1:])
+        self.queued_actions.set(self.que_id, column='action_status', value=status)
+        #self.queued_actions.set(column='action_status', value=status)
+        self.queued_actions.update()
+        self.message_logs[self.item_id]['msg_table'].append((status, msg))
+        time.sleep(delay)
+
+    def get_html(self, url, max_retries=2, retry_delay=5):
+        self.set_status("Downloading", "Start of " + url)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+        retries = 0
+
+        while retries < max_retries:
+            try:
+                response = requests.get(url, headers=headers)
+                if response.status_code == 200:
+                    raw_html = response.text
+                    self.set_status("Download","Success!")
+                    return(raw_html)
+                else:
+                    self.set_status(self.item_id, "Error","Network No Status code")
+            except requests.exceptions.RequestException as e:
+                self.set_status("Error","Network Unknown")
+            retries += 1
+            if retries < max_retries:
+                self.set_status(self.item_id, "Error","Retrying in... "+str(retry_delay))
+                time.sleep(retry_delay)
+        self.set_status("Error","Max number of retries reached.")
+        return("0")
+
+    def get_pattern(self, html, pattern):
+        if html:
+            matches = re.findall(pattern, html, re.DOTALL)
+            if matches:
+                extracted_text = matches[0].strip()
+                return(extracted_text)
+        return("0")
+
+    def process_request(self, url):
+        options = message_logs[self.item_id]['que_table'][2]
+        raw_html = self.get_html(url)
+
+        req_start = url
+        req_title = ""
+        req_filename = title = url.rsplit("/")[4]
+        self.set_status("Filename", req_filename,0)
+        req_author = ""
+        req_series = ""
+        req_links = []
+        req_tags = []
+
+        whole_file = ""
+        whole_story = ""
+
+        if raw_html != "0":
+            if options.get("series", True) is not False:
+                series_page = self.get_pattern(raw_html, regexp_series_page)
+                self.set_status("Info","Found Series Link: " + series_page,1)
+                if series_page != "0":
+                    series_html = self.get_html("https://www.literotica.com/series/se/" + series_page)
+                    if series_html != "0":
+                        series_temp = self.get_pattern(series_html, regexp_series_pages_bulk)
+                        if series_temp != "0":
+                            req_links = self.get_all_links(series_temp)
+                            for link in req_links:
+                                self.set_status("Found Link",link,0)
+                        else:
+                            self.set_status("Failed","No Series Links",1)
+                    else:
+                        self.set_status("Failed","No Series Pages",1)
+                else:
+                    self.set_status("Failed","Not a Series?",1)
             else:
-                send_status("\nError: Failed to retrieve the web page. Status code " + str(response.status_code))
-        except requests.exceptions.RequestException as e:
-            send_status("\nError: An error occurred during the web page lookup")
+                #just look up the one story, by only having 1 link to look up.
+                req_links = [url]
+        #https://www.literotica.com/s/geocatched
+        for link in req_links:
+            raw_html = self.get_html(link)
 
-        retries += 1
-        if retries < max_retries:
-            send_status("\nError: " + str(retries) + " Retrying in " + str(retry_delay) + " second(s)...")
-            time.sleep(retry_delay)
+            req_title = self.get_pattern(raw_html, regexp_title)
+            if req_title == "0":
+                req_title = self.get_pattern(raw_html, regexp_title_alt)
+            req_title = self.remove_formatting(req_title) #Fix some formatting.
+            self.set_status("Found Title", req_title,0)
 
-    send_status("\nError: Max number of retries reached. Unable to retrieve data. " + url)
-    return(0)
+            #get author
+            req_author = self.get_pattern(raw_html, regexp_author)
+            if req_author == "0":
+                req_author = self.get_pattern(raw_html, regexp_author_alt)
+            self.set_status("Found Author", req_author)
+            #get story tags
+            req_tags = self.get_all_tags(raw_html)
+            #get story page
+            whole_page = self.get_pattern(raw_html, regexp_story_page)
+            whole_page_formatted = self.remove_formatting(whole_page)
 
-def text_search_extract(raw_html, pattern):
-    if raw_html:
-        matches = re.findall(pattern, raw_html, re.DOTALL)
-        if matches:
-            extracted_text = matches[0].strip()
-            return(extracted_text)
-    return(0)
+            req_tags_string = ", ".join(req_tags)
+            req_tags_string = req_tags_string[2:]
+            story_header = link + "\n\n" + req_title + "\n" + req_author + "\n------------------------------\nTags: " + req_tags_string  + "\n------------------------------\n"
+            whole_loop = whole_page_formatted
 
-#Writes text to file, creates new file or overrites
-def write_to_file(output_file, combined_text):
-    if not output_file.endswith(".txt"):
-        output_file = output_file + ".txt"
+            req_nextpage = self.get_pattern(raw_html, regexp_next_page)
+            while req_nextpage != "0":
+                req_nextpage_link = "https://www.literotica.com" + req_nextpage
+                self.set_status("Found Next Page","Link: " + req_nextpage_link,0)
 
-    if(configuration["display_saved_file"] == "1"):
-        send_status("\nSaving: " + output_file)
-    with open(output_file, 'w', encoding='utf-8') as filew:
-        filew.write(combined_text)
-    filew.close()
+                raw_html = self.get_html(req_nextpage_link,1)
+                whole_page = self.get_pattern(raw_html, regexp_story_page)
+                whole_page_formatted = self.remove_formatting(whole_page)
 
-def config_load(config_file="LiteroticaDownloader.config"):
-    if not os.path.exists(config_file):
-        new_config_file(config_file)
-    config = {}
-    with open(config_file, "r") as file:
-        for line in file:
-            key, value = line.strip().split("=")
-            config[key] = value
-    file.close
-    return(config)
+                whole_loop = whole_loop + whole_page_formatted
 
-def config_save(config_file="LiteroticaDownloader.config"):
-    with open(config_file, "w") as file:
-        for key, value in configuration.items():
-            file.write(f"{key}={value}\n")
-    file.close
+                req_nextpage = self.get_pattern(raw_html, regexp_next_page)
 
-def new_config_file(config_file="LiteroticaDownloader.config"):
-    config = {
-        "display_dowload_url": 1,
-        "display_saved_file": 1,
-        "display_story_after_save": 1,
-        "display_story_tags": 1,
-        "error_max_pages": 25,
-        "temp_folder": "temp"
-    }
-    with open(config_file, "w") as file:
-        for key, value in config.items():
-            file.write(f"{key}={value}\n")
-    file.close
-
-################################################################################
-#               Main Story/Page Organizers
-################################################################################
-def get_story(url):
-    raw_html = download_html(url)
-    story_series = ""
-    story_title = ""
-    story_tags = []
-
-    if raw_html:
-        #Look for links to stories
-        list_right_add_story(raw_html)
-        #Gets all the parts of the story and formats it. Then gets the next part if its multipage.
-        story_title = text_search_extract(raw_html, r"<h1 class=\"j_bm headline j_eQ\">(.*?)</h1>")
-        story_title = story_title.replace("&#x27;", "\'")
-        story_author = text_search_extract(raw_html, r"class=\"y_eU\" title=\"(.*?)\">")
-
-        story_body = text_search_extract(raw_html, r"<div class=\"panel article aa_eQ\">(.*?)</div>")
-        story_nextpage = text_search_extract(raw_html, r"title=\"Next Page\" href=\"(.*?)\"><i class=\"")
-
-        #check for series
-        story_series = text_search_extract(raw_html, r"https://www.literotica.com/series/se/(.*?)\"")
-
-        story_page = format_body(story_body)
-        story_header = url + "\n\n" + story_title + "\n" + story_author + "\n------------------------------\n"
-
-        #Stores first page to main variable.
-        full_story = story_page
-
-        url_page = 1
-        if story_nextpage:
-            match = re.search(r"\d+$", story_nextpage)
+            whole_story = story_header + whole_loop + "\n------------------------------\n   The End of \n        " + req_title + "\n\n------------------------------\n\n"
+            whole_file = whole_file + whole_story
+        if len(whole_file) <= 200:
+            self.set_status("Small File","Something likely went wrong.",0)
         else:
-            match = 0;
+            #Save the file.
+            self.save_text(req_filename,whole_file)
 
-        #Find Tags:
-        story_tags = get_tags(story_tags, raw_html)
+    def save_text(self, filename, story):
+        options = message_logs[self.item_id]['que_table'][2]
+        filetype = options.get("save_type", ".txt")
+        output_file = filename + filetype
+        self.set_status("Saving File", output_file,0)
+        with open(output_file, 'w', encoding='utf-8') as file_write:
+            file_write.write(story)
+        file_write.close()
 
-        while(match):
-            send_status(".")
-            list_right_add_story(raw_html)
-            url_page = url_page + 1
-            if url_page >= int(configuration["error_max_pages"]):
-                send_status("\nError: Found more than " + configuration["error_max_pages"] +" change config file to override.")
-                break
+    def get_all_tags(self, html):
+        tags = []
+        story_tags_bulk = self.get_pattern(html, regexp_tag_bulk)
+        #regexp_tag_single
+        story_tags_temp = re.findall(regexp_tag_single, story_tags_bulk)
+        if story_tags_bulk != "0":
+            for tag in story_tags_temp:
+                if tag not in tags:
+                    tags.append(tag)
+            tags = sorted(tags)
+            self.set_status("Found Tags","Tags: " + " ".join(tags))
+        return(tags)
 
-            if(int(match.group()) == url_page):
-                JustPageURL = story_nextpage.split("?", 1)
-                NextPageURL =  url + "?" + ''.join(JustPageURL[1])
+    def get_all_links(self, html):
+        match = "https://www.literotica.com/s/"
+        black_list = ["comment","feedback"]
+        found_links = []
 
-                raw_html = download_html(NextPageURL)
-                story_body = text_search_extract(raw_html, r"<div class=\"panel article aa_eQ\">(.*?)</div>")
-                story_nextpage = text_search_extract(raw_html, r"title=\"Next Page\" href=\"(.*?)\"><i class=\"")
-                story_page = format_body(story_body)
-                #Adds current page to main story variable.
-                full_story = full_story + story_page
-
-            if not story_nextpage:
-                #check for series
-                story_series = text_search_extract(raw_html, r"www.literotica.com/series/se/(.*?)\"")
-                story_tags = get_tags(story_tags, raw_html)
-                #Find Series URL: https://www.literotica.com/series/se/(.*?)\"
-                break
-
-            match = re.search(r"\d+$", story_nextpage)
-    else:
-        send_status("\nError: Continuing to next item.")
-        return(0)
-
-    if story_series:
-        story_series_url = "https://www.literotica.com/series/se/" + story_series
-        list_right_add_story(download_html(story_series_url))
-
-    tags_string = "\nTags: "
-    for tag in story_tags:
-        tags_string = tags_string + tag + ", "
-    tags_string = tags_string[:-2]
-    if(configuration["display_story_tags"] == "1"):
-        send_status(tags_string)
-    full_story = story_header + tags_string + "\n------------------------------\n" + full_story + "\n------------------------------\n   The End of \n        " + story_title + "\n\n------------------------------\n\n"
-    return(full_story)
-
-def process_url_list(list):
-    title = ""
-    url_downloaded.clear()
-    all_pages = ""
-
-    for i in range(list.size()):
-        current_url = list.get(i)
-        story = get_story(current_url)
-        if(story != 0):
-            #Sets the file name to the url story title(prevents overwriting)
-            if(title == ""):
-                #Gets text after the last foward slash '/'
-                title = current_url.rsplit("/", 1)[-1]
-            #Saving pages up to write all at once at the end.
-            all_pages = all_pages + story
-    write_to_file(title, all_pages)
-    if(configuration["display_story_after_save"] == "1"):
-        send_status("\n" + all_pages)
-
-################################################################################
-#               Data Formatting/Conditioning
-################################################################################
-def get_tags(tags, raw_html):
-    #Try first pattern....
-    pattern = r'av_as av_r\">(.*?)</a>'
-    tags_temp = re.findall(pattern, raw_html)
-    if not tags_temp:
-        #Try second pattern...
-        pattern = r'av_as\">(.*?)</a>'
-        tags_temp = re.findall(pattern, raw_html)
-    for text in tags_temp:
-        #if tags found before, unlikely, dont duplicate them.
-        if text not in tags:
-            tags.append(text)
-    tags = sorted(tags)
-    return(tags)
-
-def find_stories(link):
-    list_right_add_story(download_html(link))
-
-def list_right_add_story(raw_html):
-    match = "https://www.literotica.com/s/"
-    black_list = ["comment","feedback"]
-
-    if(raw_html != 0):
-        http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", raw_html)
-        for link in http_links:
-            #send_status("\n --- " + link)
-            if link.startswith(match):
-                if link.rsplit("/", 2)[-2] == "s": #matches URL previous directory, makes sure this is a story and not a feedack/comment/etc.
+        if html != "0":
+            http_links = re.findall(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+", html)
+            for link in http_links:
+                if link.startswith(match):
+                    if link.rsplit("/", 2)[-2] == "s":  # matches URL previous directory, makes sure this is a story and not feedback/comment/etc.
                         link_story = link.rsplit("/", 1)[-1]
-                        if link_story not in list_right.get(0, tk.END):
-                            list_right.insert(tk.END, link_story)
+                        if link_story not in found_links and not any(keyword in link_story for keyword in black_list):
+                            found_links.append(match + link_story)
+        return found_links
 
-#Removes extra html formating. Im sure there are more that exist or an easier way.
-def format_body(TextBody):
-    #Removes html formating
-    TextBody = TextBody.replace("<p align=\"center\">", "\n")
-    TextBody = TextBody.replace("<p>", "\n")
-    TextBody = TextBody.replace("</p>", "\n")
-    TextBody = TextBody.replace("<br>", "\n")
-    TextBody = TextBody.replace("<div class=\"aa_ht\">", "")
-    TextBody = TextBody.replace("&#x27;", "\'")
-    TextBody = TextBody.replace("<div>", "")
-    TextBody = TextBody.replace("</div>", "")
-    TextBody = TextBody.replace("<strong>", "")
-    TextBody = TextBody.replace("</strong>", "")
-    TextBody = TextBody.replace("<b>", "")
-    TextBody = TextBody.replace("</b>", "")
-    TextBody = TextBody.replace("<i>", "")
-    TextBody = TextBody.replace("</i>", "")
-    TextBody = TextBody.replace("<em>", "")
-    TextBody = TextBody.replace("</em>", "")
-    return(TextBody)
-################################################################################
-#                GUI Handlers
-################################################################################
+    def remove_formatting(self, html):
+        html = html.replace("<p align=\"center\">", "\n")
+        html = html.replace("<p>", "\n")
+        html = html.replace("</p>", "\n")
+        html = html.replace("<br>", "\n")
+        html = html.replace("<div class=\"aa_ht\">", "")
+        html = html.replace("&#x27;", "\'")
+        html = html.replace("<div class=\"aa_ht \">", "")
+        html = html.replace("<div>", "")
+        html = html.replace("</div>", "")
+        html = html.replace("<strong>", "")
+        html = html.replace("</strong>", "")
+        html = html.replace("<b>", "")
+        html = html.replace("</b>", "")
+        html = html.replace("<i>", "")
+        html = html.replace("</i>", "")
+        html = html.replace("<em>", "")
+        html = html.replace("</em>", "")
+        return(html)
 
-def send_status(status_text):
-    status_box.config(state=tk.NORMAL)
-    status_box.update_idletasks()
-    status_box.insert(tk.END, status_text)
-    status_box.see(tk.END)
-    status_box.config(state=tk.DISABLED)
+    def run(self):
+        with DownloadThread.semaphore:  # Acquire the semaphore
+            #self.queued_actions.set(self.item_id, column='action_type', value=i)
+            self.set_status("Processing","In Progress...")
+            url = message_logs[self.item_id]['que_table'][1]
+            options = message_logs[self.item_id]['que_table'][2]
+            self.process_request(url)
+            self.queued_actions.event_generate('<<TreeviewUpdate>>')
+            self.set_status("Completed","Thank you.")
 
-def button_add_item():
-    menu_left_add()
+    def stop(self):
+        self.stopped = True
 
-def button_delete_item():
-    menu_left_delete()
+def on_closing():
+    clear_all()
+    for thread in threads:
+        thread.stop()
+    root.destroy()
 
-def handle_button3():
-    send_status("\nButton 3 clicked!")
+def que_delete_selected():
+    selection = queued_actions.selection()
+    for item in selection:
+        queued_actions.delete(item)
 
-def button_find_stories():
-    #https://www.literotica.com/stories/new_submissions.php
-    find_stories("https://www.literotica.com/stories/new_submissions.php")
+def que_move_item_up():
+    selection = queued_actions.selection()
+    for item in selection:
+        queued_actions.move(item, queued_actions.parent(item), queued_actions.index(item) - 1)
 
-def button_clear_status():
-    clear_status_text()
+def que_move_item_down():
+    selection = queued_actions.selection()[::-1]
+    for item in selection:
+        queued_actions.move(item, queued_actions.parent(item), queued_actions.index(item) + 1)
 
-def button_download(list):
-    process_url_list(list)
+def que_clear_all():
+    queued_actions.delete(*queued_actions.get_children())
 
-def menu_right_delete():
-    selection = list_right.curselection()
-    if selection:
-        selected_index = list_right.get(tk.ACTIVE)
-        index = selection[0]
-        list_right.delete(index)
+def que_action():
+    que_url = action_url.get()
+    que_options = ''
 
-def menu_right_move():
-    selection = list_right.curselection()
-    if selection:
-        selected_index = list_right.get(tk.ACTIVE)
-        list_left.insert(tk.END, "https://www.literotica.com/s/" + selected_index)
+    que_options = {'series': action_get_series.get(), 'save_type': '.txt'}
 
-def menu_right_clear():
-    list_right.delete(0, tk.END)
+    entry_name = "Job " + str(len(message_logs) + 1).zfill(4)
+    message_logs[entry_name] = {'que_table': ("Waiting", que_url, que_options), 'msg_table': [("Message","Entry added to list.")]}
+    que_id = queued_actions.insert('', tk.END, text=entry_name, values=message_logs[entry_name]['que_table'])
+    queued_actions.set(que_id, column='action_status', value="Message")
 
-def menu_left_delete():
-    selection = list_left.curselection()
-    if selection:
-        selected_index = list_left.get(tk.ACTIVE)
-        index = selection[0]
-        list_left.delete(index)
+    msg_table_data = message_logs[entry_name]['msg_table']
+    message_log_grid.delete(*message_log_grid.get_children())
+    for item in msg_table_data:
+        message_log_grid.insert('', tk.END, values=item)
 
-def menu_left_add():
-    # Create a new window for the text input
-    input_window = tk.Toplevel(window)
-    input_window.title("Enter Text")
+    message_logs.update()
 
-    # Create an entry widget for text input
-    entry = tk.Entry(input_window, width=100)
-    entry.pack(padx=0, pady=0)
+    thread = DownloadThread(que_id, entry_name, queued_actions, message_logs)
+    threads.append(thread)
+    thread.start()
+#################################################
+##           GUI Actions Setup
+#################################################
+def display_msg_log(event):
+    selected_item = queued_actions.focus()
 
-    def save_text():
-        text = entry.get()
-        if text:
-            list_left.insert(tk.END, text)
-            input_window.destroy()
-        else:
-            input_window.destroy()
+    if selected_item:
+        selected_entry = queued_actions.item(selected_item)['text']
+        msg_table_data = message_logs[selected_entry]['msg_table']
+        message_log_grid.delete(*message_log_grid.get_children())
+        for item in msg_table_data:
+            message_log_grid.insert('', tk.END, values=item)
 
-    # Create a save button to add the text to the list
-    save_button = tk.Button(input_window, text="Add Item", command=save_text)
-    save_button.pack(pady=5)
+def open_file():
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        # Process the opened file
+        print("Opened file:", file_path)
 
-def menu_left_clear():
-    list_left.delete(0, tk.END)
+def save_file():
+    file_path = filedialog.asksaveasfilename(defaultextension=".txt")
+    if file_path:
+        # Save the file
+        print("Saved file:", file_path)
 
-def show_menu_left(event):
-    menu_left.tk_popup(event.x_root, event.y_root)
+def exit_app():
+    window.quit()
 
-def key_left_delete(event):
-    menu_left_delete()
-
-def mouse_right_move(event):
-    menu_right_move()
-
-def show_menu_right(event):
-    menu_right.tk_popup(event.x_root, event.y_root)
-
-def key_right_delete(event):
-    menu_right_delete()
-
-def clear_status_text():
-    status_box.config(state=tk.NORMAL)
-    status_box.delete("1.0", tk.END)
-    status_box.config(state=tk.DISABLED)
-################################################################################
-#               GUI Layout
-################################################################################
-# Load Confige file
-configuration = config_load()
-
-# Create the GUI window
+#################################################
+##           Create the main GUI
+#################################################
 window = tk.Tk()
-window.title("Web Text Extractor")
+window.title("Literotica Downloader")
 window.geometry("800x600")
 
-# Create a frame to hold the buttons
-frame_button = tk.Frame(window)
-frame_button.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
-# Create a frame to hold the Get URL List
-frame_list_left = tk.Frame(window)
-frame_list_left.pack(side=tk.LEFT, fill=tk.Y, padx=0, pady=0)
-# Create a frame to hold the Get URL List
-frame_list_right = tk.Frame(window)
-frame_list_right.pack(side=tk.RIGHT, fill=tk.Y, padx=0, pady=0)
-# Create a frame to Status box and Scrollbar
-frame_status = tk.Frame(window)
-frame_status.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=0, pady=0)
+#################################################
+##           Frame Setup
+#################################################
+frame_main = tk.Frame(window, width=800) #, borderwidth=2, relief="groove"
+frame_main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
+#Action Buttons and Controls
+frame_action = tk.Frame(frame_main, width=800, height=50, borderwidth=2, relief="groove")
+frame_action.pack(side=tk.TOP, fill=tk.BOTH, padx=0, pady=0)
+#Que Tree View
+frame_que = tk.Frame(frame_main, width=800, height=100, borderwidth=2, relief="groove")
+frame_que.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
+#Status Messages
+frame_message_log = tk.Frame(window, width=800, height=650)
+frame_message_log.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
+#################################################
+##           Menu Bar Setup
+#################################################
+# menu_bar = tk.Menu(window)
+# window.config(menu=menu_bar)
+# # Create the File menu
+# file_menu = tk.Menu(menu_bar, tearoff=False)
+# menu_bar.add_cascade(label="File", menu=file_menu)
+# # Add menu items to the File menu
+# file_menu.add_command(label="Open", command=open_file)
+# file_menu.add_command(label="Save", command=save_file)
+# file_menu.add_separator()
+# file_menu.add_command(label="Exit", command=exit_app)
 
-frame_status_scrollbar = tk.Frame(frame_status)
-frame_status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=0, pady=0)
+#################################################
+##           Actions Setup
+#################################################
+action_lbl_url = tk.Label(frame_action, text="URL: ")
+action_lbl_url.pack(side=tk.LEFT)
+action_url = tk.Entry(frame_action, width=100)
+action_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-# Create the list on the left
-list_left = tk.Listbox(frame_list_left, width=30)
-list_left.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-#list_left.insert(tk.END, "Some URL")
+action_get_series = tk.BooleanVar()
+action_get_series_chkbox = ttk.Checkbutton(frame_action, text='Get Whole Series', variable=action_get_series)
+action_get_series_chkbox.pack(side=tk.LEFT)
 
-# Add a horizontal scrollbar to the left list box
-list_left_scrollbar = ttk.Scrollbar(frame_list_left, orient=tk.HORIZONTAL, command=list_left.xview)
-list_left_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-list_left.config(xscrollcommand=list_left_scrollbar.set)
+action_add_action = tk.Button(frame_action, text="Add", command=que_action)
+action_add_action.pack(side=tk.LEFT)
+#################################################
+##           Queued List
+#################################################
+frame_que.columnconfigure(0, weight=1)
+frame_que.columnconfigure(1, weight=1)
+frame_que.columnconfigure(2, weight=1)
+frame_que.columnconfigure(3, weight=1)
+frame_que.rowconfigure(1, weight=1)
 
-# Create the list on the right
-list_right = tk.Listbox(frame_list_right, width=40)
-list_right.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-#list_right.insert(tk.END, "Some story name")
+#queued_btn_delete = tk.Button(frame_que, text='Delete Selected') #, command=delete_selected
+#queued_btn_delete.grid(row=0, column=0, sticky="nw")
 
-# Add a horizontal scrollbar to the right list box
-list_right_scrollbar = ttk.Scrollbar(frame_list_right, orient=tk.HORIZONTAL, command=list_right.xview)
-list_right_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-list_right.config(xscrollcommand=list_right_scrollbar.set)
+#queued_btn_move_up = tk.Button(frame_que, text='Move Up') #, command=move_item_up
+#queued_btn_move_up.grid(row=0, column=1, sticky="new")
 
-# Create buttons and assign actions
-button_add_item = ttk.Button(frame_button, text="Add Item", command=button_add_item)
-button_add_item.pack(side=tk.LEFT, padx=5)
+#queued_btn_move_down = tk.Button(frame_que, text='Move Down') #, command=move_item_down
+#queued_btn_move_down.grid(row=0, column=2, sticky="new")
 
-button2 = ttk.Button(frame_button, text="Delete Item", command=button_delete_item)
-button2.pack(side=tk.LEFT, padx=5)
+#queued_btn_clear = tk.Button(frame_que, text='Clear All') #, command=clear_all
+#queued_btn_clear.grid(row=0, column=3, sticky="ne")
 
-#button3 = ttk.Button(frame_button, text="Button 3", command=handle_button3)
-#button3.pack(side=tk.LEFT, padx=5)
+global queued_actions
+queued_actions = ttk.Treeview(frame_que, columns=("action_status", "action_url", "action_options"), show="headings")
+# Set column names
+queued_actions.heading("action_status", text="Status")
+queued_actions.heading("action_url", text="URL")
+queued_actions.heading("action_options", text="Options")
 
-button_find_stories = ttk.Button(frame_button, text="Get New Stories", command=button_find_stories)
-button_find_stories.pack(side=tk.LEFT, padx=5)
+queued_actions.column("action_status", width=70)
+queued_actions.column("action_url", width=300)
+queued_actions.column("action_options", width=200)
 
-button5 = ttk.Button(frame_button, text="Clear Status Log", command=button_clear_status)
-button5.pack(side=tk.LEFT, padx=5)
+queued_actions.grid(row=1, column=0, columnspan=4, sticky="nsew")
 
-button6 = ttk.Button(frame_button, text="Download", command=lambda: button_download(list_left))
-button6.pack(side=tk.LEFT, padx=5)
+queued_actions.bind('<<TreeviewSelect>>', display_msg_log)
 
-# Create the status box as a scrolled text widget
-status_box = tk.Text(frame_status)
-status_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-status_box.config(state=tk.DISABLED)
+#################################################
+##           Message Logs Set up
+#################################################
+frame_message_log.rowconfigure(0, weight=1)
+frame_message_log.columnconfigure(0, weight=2)
 
-# Add a vertical scrollbar to the status box
-status_scrollbar = ttk.Scrollbar(frame_status_scrollbar, orient=tk.VERTICAL, command=status_box.yview)
-status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
-status_box.config(yscrollcommand=status_scrollbar.set)
+message_log_grid = ttk.Treeview(frame_message_log, columns=("msg_type", "msg_text"), show="headings")
+message_log_grid.heading("msg_type", text="Type")
+message_log_grid.heading("msg_text", text="Message")
 
-# Create a right-click menu for left list
-menu_left = tk.Menu(window, tearoff=0)
-menu_left.add_command(label="Add Item", command=menu_left_add)
-menu_left.add_command(label="Delete Item", command=menu_left_delete)
-menu_left.add_command(label="Clear List", command=menu_left_clear)
+message_log_grid.column("msg_type", width=50)
+message_log_grid.column("msg_text", width=600)
 
-# Create a right-click menu for right list
-menu_right = tk.Menu(window, tearoff=0)
-menu_right.add_command(label="Add to List", command=menu_right_move)
-menu_right.add_command(label="Delete Item", command=menu_right_delete)
-menu_right.add_command(label="Clear List", command=menu_right_clear)
+message_log_grid.grid(row=0, column=0, sticky="nsew")
 
-# Bind the right-click event to the listbox
-list_left.bind("<Button-3>", show_menu_left)
-list_left.bind("<Delete>", key_left_delete)
-
-list_right.bind("<Button-3>", show_menu_right)
-list_right.bind("<Delete>", key_right_delete)
-list_right.bind("<Double-Button-1>", mouse_right_move)
-
-# Bind the closing event to a function
-#window.protocol("WM_DELETE_WINDOW", on_closing)
+threads = []
 
 # Start the GUI event loop
 window.mainloop()
