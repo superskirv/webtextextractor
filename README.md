@@ -27,3 +27,5 @@ Some Known Issues:
    - (Plan to make it work from cache, adding delays on downloading html)
 9. Make code look and act clean
    - (Its dirty. Refer to issue 6)
+10. Possible errors if you exit the app while its still running jobs.
+   - (Basically the threads lock up with nothing to report back too. Might stay running in background, havent tested all senerios for this.)
