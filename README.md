@@ -7,14 +7,16 @@ Update v2:
 I have re-written nearly every line of code from the ground up. The new interface still needs some loving, but it is much better than before. I removed the config file options and link discovery for now. I plan to re-add these in the future. There is also a "options" field for individual jobs. As of right now the only user change is weather or not to download the whole series, which I cant figure out why you wouldn't.
 
 The Vision:
-I plan to change how the parsing of text is search/found/extracted works. I have learned a new ways to do it. I just didn't want to delay completing my re-write with learning and implementing a new method right in the middle of it. I will make the changes, especially as the website updates and breaks the way I'm currently looking for text bits.
+I plan to change how the parsing of text is search/found/extracted works. I have learned a new ways to do it. I just didn't want to delay completing my re-write with learning and implementing a new method right in the middle of it. I will make the changes as the Literotic web page updates and breaks the way I'm currently looking for text bits.
 
 Some Known Issues:
 
-1. Allow users to config more options.
+1. No way for users to config more options.
    - (One option that isnt currently configurable is the file extension.)
 2. No way to delete jobs, even if they are completed.
-3. Status messages could be more clear.
+   - (looking into a pause/stop/delete/move up/down buttons)
+3. Status messages not very informative.
+   - If you see something that could be more clear, let me know.
 4. No scroll bar on the message log for jobs.
    - (You can use your mouse wheel.)
 5. Message logs do not auto update
@@ -24,8 +26,10 @@ Some Known Issues:
 7. The interface looks lame.
    - (Less lame than before, but still working on it)
 8. Obvious network abuses possible.
-   - (Plan to make it work from cache, adding delays on downloading html)
+   - (Less lame than before, but still working on it)
 9. Make code look and act clean
-   - (Its dirty. Refer to issue 6)
-10. Possible errors if you exit the app while its still running jobs.
-   - (Basically the threads lock up with nothing to report back too. Might stay running in background, havent tested all senerios for this.)
+   - (Plan to make it work from cache, adding delays on downloading html)
+10. Make code look and act clean
+    - (Its dirty. Refer to issue 6)
+11. Possible errors if you exit the app while its still running jobs
+    - (Basically the threads lock up with nothing to report back too. Might stay running in background, havent tested all senerios for this.)
