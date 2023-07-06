@@ -5,8 +5,9 @@ import threading
 import time
 import requests
 import re
+# import os
 
-file_version = '2023.07.05.A'
+file_version = '2023.07.05.B'
 
 #################################################
 ##           Reqexp Formulas Setup
@@ -24,21 +25,6 @@ regexp_tag_single =         r" class=\"av_as av_r\">(.*?)</a>"
 #regexp_tag_single_alt =    r" class=\"av_as \"(.*?)</a>" #unused.
 regexp_story_page = r"<div class=\"panel article aa_eQ\">(.*?)</div>"
 regexp_next_page = r"title=\"Next Page\" href=\"(.*?)\"><i class=\""
-
-
-#################################################
-##           Class Element Setup
-#################################################
-# Future/Better way to look up html elements
-# Will probably convert to using this as changes occur.
-#element_title = "j_bm headline j_eQ"
-#element_series_page = "bn_av"
-#element_series_pages_bulk = "series__works"
-
-#element_author = "y_eU"
-#element_tags = "av_as av_r"
-#element_story_page = "panel article aa_eQ"
-#element_next_page = "l_bJ l_bL"
 
 global message_logs
 message_logs = {}
@@ -61,10 +47,8 @@ class DownloadThread(threading.Thread):
             msg = status
             status = "Old Format"
 
-        #self.message_logs[item_id]['que_table'][0] = "Processing"
         self.message_logs[self.item_id]['que_table'] = (status, *self.message_logs[self.item_id]['que_table'][1:])
         self.queued_actions.set(self.que_id, column='action_status', value=status)
-        #self.queued_actions.set(column='action_status', value=status)
         self.queued_actions.update()
         self.message_logs[self.item_id]['msg_table'].append((status, msg))
         time.sleep(delay)
@@ -133,18 +117,19 @@ class DownloadThread(threading.Thread):
                     else:
                         self.set_status("Failed","No Series Pages",1)
                 else:
-                    self.set_status("Failed","Not a Series?",1)
+                    self.set_status("Failed","Not a Series? Falling back to single story mode.",1)
+                    req_links = [url]
             else:
                 #just look up the one story, by only having 1 link to look up.
                 req_links = [url]
-        #https://www.literotica.com/s/geocatched
+
         for link in req_links:
             raw_html = self.get_html(link)
 
             req_title = self.get_pattern(raw_html, regexp_title)
             if req_title == "0":
                 req_title = self.get_pattern(raw_html, regexp_title_alt)
-            req_title = self.remove_formatting(req_title) #Fix some formatting.
+            req_title = self.remove_formatting(req_title) #Fixes some formatting.
             self.set_status("Found Title", req_title,0)
 
             #get author
@@ -196,7 +181,6 @@ class DownloadThread(threading.Thread):
     def get_all_tags(self, html):
         tags = []
         story_tags_bulk = self.get_pattern(html, regexp_tag_bulk)
-        #regexp_tag_single
         story_tags_temp = re.findall(regexp_tag_single, story_tags_bulk)
         if story_tags_bulk != "0":
             for tag in story_tags_temp:
@@ -243,7 +227,6 @@ class DownloadThread(threading.Thread):
 
     def run(self):
         with DownloadThread.semaphore:  # Acquire the semaphore
-            #self.queued_actions.set(self.item_id, column='action_type', value=i)
             self.set_status("Processing","In Progress...")
             url = message_logs[self.item_id]['que_table'][1]
             options = message_logs[self.item_id]['que_table'][2]
@@ -258,7 +241,7 @@ def on_closing():
     clear_all()
     for thread in threads:
         thread.stop()
-    root.destroy()
+    window.destroy()
 
 def que_delete_selected():
     selection = queued_actions.selection()
@@ -282,10 +265,10 @@ def que_action():
     que_url = action_url.get()
     que_options = ''
 
-    que_options = {'series': action_get_series.get(), 'save_type': '.txt'}
+    que_options = {'job_type': 'download','series': action_get_series.get(), 'save_type': '.txt'}
 
     entry_name = "Job " + str(len(message_logs) + 1).zfill(4)
-    message_logs[entry_name] = {'que_table': ("Waiting", que_url, que_options), 'msg_table': [("Message","Entry added to list.")]}
+    message_logs[entry_name] = {'que_table': ("Waiting", que_url, que_options), 'msg_table': [("Waiting","Entry added to list, waiting for que.")]}
     que_id = queued_actions.insert('', tk.END, text=entry_name, values=message_logs[entry_name]['que_table'])
     queued_actions.set(que_id, column='action_status', value="Message")
 
@@ -299,9 +282,18 @@ def que_action():
     thread = DownloadThread(que_id, entry_name, queued_actions, message_logs)
     threads.append(thread)
     thread.start()
+
 #################################################
 ##           GUI Actions Setup
 #################################################
+def find_txt_files(directory):
+    txt_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.txt'):
+                txt_files.append(os.path.join(root, file))
+    return txt_files
+
 def display_msg_log(event):
     selected_item = queued_actions.focus()
 
@@ -313,10 +305,15 @@ def display_msg_log(event):
             message_log_grid.insert('', tk.END, values=item)
 
 def open_file():
-    file_path = filedialog.askopenfilename()
-    if file_path:
-        # Process the opened file
-        print("Opened file:", file_path)
+    root = tk()
+    root.withdraw()
+
+    directory = filedialog.askdirectory(title='Select Directory')
+    if directory:
+        txt_files = find_txt_files(directory)
+        que_update_job(directory, txt_files) #Runs job to update existing stories.
+    else:
+        print("No directory selected.")
 
 def save_file():
     file_path = filedialog.asksaveasfilename(defaultextension=".txt")
@@ -348,19 +345,6 @@ frame_que.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
 #Status Messages
 frame_message_log = tk.Frame(window, width=800, height=650)
 frame_message_log.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
-#################################################
-##           Menu Bar Setup
-#################################################
-# menu_bar = tk.Menu(window)
-# window.config(menu=menu_bar)
-# # Create the File menu
-# file_menu = tk.Menu(menu_bar, tearoff=False)
-# menu_bar.add_cascade(label="File", menu=file_menu)
-# # Add menu items to the File menu
-# file_menu.add_command(label="Open", command=open_file)
-# file_menu.add_command(label="Save", command=save_file)
-# file_menu.add_separator()
-# file_menu.add_command(label="Exit", command=exit_app)
 
 #################################################
 ##           Actions Setup
@@ -385,21 +369,9 @@ frame_que.columnconfigure(2, weight=1)
 frame_que.columnconfigure(3, weight=1)
 frame_que.rowconfigure(1, weight=1)
 
-#queued_btn_delete = tk.Button(frame_que, text='Delete Selected') #, command=delete_selected
-#queued_btn_delete.grid(row=0, column=0, sticky="nw")
-
-#queued_btn_move_up = tk.Button(frame_que, text='Move Up') #, command=move_item_up
-#queued_btn_move_up.grid(row=0, column=1, sticky="new")
-
-#queued_btn_move_down = tk.Button(frame_que, text='Move Down') #, command=move_item_down
-#queued_btn_move_down.grid(row=0, column=2, sticky="new")
-
-#queued_btn_clear = tk.Button(frame_que, text='Clear All') #, command=clear_all
-#queued_btn_clear.grid(row=0, column=3, sticky="ne")
-
 global queued_actions
 queued_actions = ttk.Treeview(frame_que, columns=("action_status", "action_url", "action_options"), show="headings")
-# Set column names
+
 queued_actions.heading("action_status", text="Status")
 queued_actions.heading("action_url", text="URL")
 queued_actions.heading("action_options", text="Options")
