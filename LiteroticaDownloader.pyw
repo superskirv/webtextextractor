@@ -5,9 +5,9 @@ import threading
 import time
 import requests
 import re
-# import os
+#import os
 
-file_version = '2023.07.05.B'
+file_version = '2023.07.05.C'
 
 #################################################
 ##           Reqexp Formulas Setup
@@ -22,7 +22,7 @@ regexp_author_alt = r"class=\"y_eU\" title=\"(.*?)\">" # class="y_eR" title="Ran
 
 regexp_tag_bulk = r'<div class=\"bn_Q bn_ar\">(.*?)</div>'
 regexp_tag_single =         r" class=\"av_as av_r\">(.*?)</a>"
-#regexp_tag_single_alt =    r" class=\"av_as \"(.*?)</a>" #unused.
+
 regexp_story_page = r"<div class=\"panel article aa_eQ\">(.*?)</div>"
 regexp_next_page = r"title=\"Next Page\" href=\"(.*?)\"><i class=\""
 
@@ -49,12 +49,13 @@ class DownloadThread(threading.Thread):
 
         self.message_logs[self.item_id]['que_table'] = (status, *self.message_logs[self.item_id]['que_table'][1:])
         self.queued_actions.set(self.que_id, column='action_status', value=status)
+
         self.queued_actions.update()
         self.message_logs[self.item_id]['msg_table'].append((status, msg))
         time.sleep(delay)
 
     def get_html(self, url, max_retries=2, retry_delay=5):
-        self.set_status("Downloading", "Start of " + url)
+        self.set_status("Downloading", url)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
         retries = 0
 
@@ -66,14 +67,14 @@ class DownloadThread(threading.Thread):
                     self.set_status("Download","Success!")
                     return(raw_html)
                 else:
-                    self.set_status(self.item_id, "Error","Network No Status code")
+                    self.set_status("Netwok Error", self.item_id + ": Network No Status code")
             except requests.exceptions.RequestException as e:
-                self.set_status("Error","Network Unknown")
+                self.set_status("Netwok Error","Network Unknown")
             retries += 1
             if retries < max_retries:
-                self.set_status(self.item_id, "Error","Retrying in... "+str(retry_delay))
+                self.set_status("Netwok Error", self.item_id + " Retrying in... "+str(retry_delay))
                 time.sleep(retry_delay)
-        self.set_status("Error","Max number of retries reached.")
+        self.set_status("Netwok Error","Max number of retries reached.")
         return("0")
 
     def get_pattern(self, html, pattern):
@@ -103,7 +104,7 @@ class DownloadThread(threading.Thread):
         if raw_html != "0":
             if options.get("series", True) is not False:
                 series_page = self.get_pattern(raw_html, regexp_series_page)
-                self.set_status("Info","Found Series Link: " + series_page,1)
+                self.set_status("Processing","Found Series Link: " + series_page,1)
                 if series_page != "0":
                     series_html = self.get_html("https://www.literotica.com/series/se/" + series_page)
                     if series_html != "0":
@@ -129,7 +130,7 @@ class DownloadThread(threading.Thread):
             req_title = self.get_pattern(raw_html, regexp_title)
             if req_title == "0":
                 req_title = self.get_pattern(raw_html, regexp_title_alt)
-            req_title = self.remove_formatting(req_title) #Fixes some formatting.
+            req_title = self.remove_formatting(req_title) #Fix some formatting.
             self.set_status("Found Title", req_title,0)
 
             #get author
@@ -144,7 +145,7 @@ class DownloadThread(threading.Thread):
             whole_page_formatted = self.remove_formatting(whole_page)
 
             req_tags_string = ", ".join(req_tags)
-            req_tags_string = req_tags_string[2:]
+            req_tags_string = re.sub(r'^[\s,]+', '', req_tags_string)
             story_header = link + "\n\n" + req_title + "\n" + req_author + "\n------------------------------\nTags: " + req_tags_string  + "\n------------------------------\n"
             whole_loop = whole_page_formatted
 
@@ -164,10 +165,12 @@ class DownloadThread(threading.Thread):
             whole_story = story_header + whole_loop + "\n------------------------------\n   The End of \n        " + req_title + "\n\n------------------------------\n\n"
             whole_file = whole_file + whole_story
         if len(whole_file) <= 200:
-            self.set_status("Small File","Something likely went wrong.",0)
+            self.set_status("Error","File to small, something likely went wrong.",0)
+            return("0")
         else:
             #Save the file.
             self.save_text(req_filename,whole_file)
+            return("Completed")
 
     def save_text(self, filename, story):
         options = message_logs[self.item_id]['que_table'][2]
@@ -181,13 +184,14 @@ class DownloadThread(threading.Thread):
     def get_all_tags(self, html):
         tags = []
         story_tags_bulk = self.get_pattern(html, regexp_tag_bulk)
+        #regexp_tag_single
         story_tags_temp = re.findall(regexp_tag_single, story_tags_bulk)
         if story_tags_bulk != "0":
             for tag in story_tags_temp:
                 if tag not in tags:
                     tags.append(tag)
             tags = sorted(tags)
-            self.set_status("Found Tags","Tags: " + " ".join(tags))
+            self.set_status("Processing","Found Tags: " + " ".join(tags))
         return(tags)
 
     def get_all_links(self, html):
@@ -227,12 +231,14 @@ class DownloadThread(threading.Thread):
 
     def run(self):
         with DownloadThread.semaphore:  # Acquire the semaphore
-            self.set_status("Processing","In Progress...")
+            self.set_status("Processing","Beginning job...")
             url = message_logs[self.item_id]['que_table'][1]
-            options = message_logs[self.item_id]['que_table'][2]
-            self.process_request(url)
+            job_error = self.process_request(url)
             self.queued_actions.event_generate('<<TreeviewUpdate>>')
-            self.set_status("Completed","Thank you.")
+            if job_error != "0":
+                self.set_status(job_error,"Thank you.")
+            else:
+                self.set_status("Error","Please read log.")
 
     def stop(self):
         self.stopped = True
@@ -270,7 +276,7 @@ def que_action():
     entry_name = "Job " + str(len(message_logs) + 1).zfill(4)
     message_logs[entry_name] = {'que_table': ("Waiting", que_url, que_options), 'msg_table': [("Waiting","Entry added to list, waiting for que.")]}
     que_id = queued_actions.insert('', tk.END, text=entry_name, values=message_logs[entry_name]['que_table'])
-    queued_actions.set(que_id, column='action_status', value="Message")
+    queued_actions.set(que_id, column='action_status', value="Waiting")
 
     msg_table_data = message_logs[entry_name]['msg_table']
     message_log_grid.delete(*message_log_grid.get_children())
@@ -371,7 +377,7 @@ frame_que.rowconfigure(1, weight=1)
 
 global queued_actions
 queued_actions = ttk.Treeview(frame_que, columns=("action_status", "action_url", "action_options"), show="headings")
-
+# Set column names
 queued_actions.heading("action_status", text="Status")
 queued_actions.heading("action_url", text="URL")
 queued_actions.heading("action_options", text="Options")
@@ -381,6 +387,10 @@ queued_actions.column("action_url", width=300)
 queued_actions.column("action_options", width=200)
 
 queued_actions.grid(row=1, column=0, columnspan=4, sticky="nsew")
+
+frame_que_scrollbar = ttk.Scrollbar(frame_que, orient="vertical", command=queued_actions.yview)
+frame_que_scrollbar.grid(row=1, column=4, sticky="ns")
+queued_actions.configure(yscrollcommand=frame_que_scrollbar.set)
 
 queued_actions.bind('<<TreeviewSelect>>', display_msg_log)
 
@@ -399,6 +409,9 @@ message_log_grid.column("msg_text", width=600)
 
 message_log_grid.grid(row=0, column=0, sticky="nsew")
 
+frame_message_log_scrollbar = ttk.Scrollbar(frame_message_log, orient="vertical", command=message_log_grid.yview)
+frame_message_log_scrollbar.grid(row=0, column=1, sticky="ns")
+message_log_grid.configure(yscrollcommand=frame_message_log_scrollbar.set)
 threads = []
 
 # Start the GUI event loop
