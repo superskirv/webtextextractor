@@ -5,9 +5,8 @@ import threading
 import time
 import requests
 import re
-#import os
 
-file_version = '2023.07.05.C'
+file_version = '2023.07.06.A'
 
 #################################################
 ##           Reqexp Formulas Setup
@@ -131,13 +130,13 @@ class DownloadThread(threading.Thread):
             if req_title == "0":
                 req_title = self.get_pattern(raw_html, regexp_title_alt)
             req_title = self.remove_formatting(req_title) #Fix some formatting.
-            self.set_status("Found Title", req_title,0)
+            self.set_status("Processing", "Found Title " + req_title,0)
 
             #get author
             req_author = self.get_pattern(raw_html, regexp_author)
             if req_author == "0":
                 req_author = self.get_pattern(raw_html, regexp_author_alt)
-            self.set_status("Found Author", req_author)
+            self.set_status("Processing", "Found Author " + req_author)
             #get story tags
             req_tags = self.get_all_tags(raw_html)
             #get story page
@@ -146,13 +145,17 @@ class DownloadThread(threading.Thread):
 
             req_tags_string = ", ".join(req_tags)
             req_tags_string = re.sub(r'^[\s,]+', '', req_tags_string)
+
             story_header = link + "\n\n" + req_title + "\n" + req_author + "\n------------------------------\nTags: " + req_tags_string  + "\n------------------------------\n"
+            if options.get("save_fileversion", True) is not False:
+                story_header = story_header + "Lit-Rip-Ver: " + file_version + "\n------------------------------\n"
+
             whole_loop = whole_page_formatted
 
             req_nextpage = self.get_pattern(raw_html, regexp_next_page)
             while req_nextpage != "0":
                 req_nextpage_link = "https://www.literotica.com" + req_nextpage
-                self.set_status("Found Next Page","Link: " + req_nextpage_link,0)
+                self.set_status("Processing","Found Next Page Link: " + req_nextpage_link,0)
 
                 raw_html = self.get_html(req_nextpage_link,1)
                 whole_page = self.get_pattern(raw_html, regexp_story_page)
@@ -216,6 +219,7 @@ class DownloadThread(threading.Thread):
         html = html.replace("<br>", "\n")
         html = html.replace("<div class=\"aa_ht\">", "")
         html = html.replace("&#x27;", "\'")
+        html = html.replace("&quot;", "\"")
         html = html.replace("<div class=\"aa_ht \">", "")
         html = html.replace("<div>", "")
         html = html.replace("</div>", "")
@@ -225,6 +229,8 @@ class DownloadThread(threading.Thread):
         html = html.replace("</b>", "")
         html = html.replace("<i>", "")
         html = html.replace("</i>", "")
+        html = html.replace("<u>", "")
+        html = html.replace("</u>", "")
         html = html.replace("<em>", "")
         html = html.replace("</em>", "")
         return(html)
@@ -271,7 +277,7 @@ def que_action():
     que_url = action_url.get()
     que_options = ''
 
-    que_options = {'job_type': 'download','series': action_get_series.get(), 'save_type': '.txt'}
+    que_options = {'job_type': 'download','series': options_save_series.get(), 'save_type': options_save_filetype, 'save_fileversion': options_save_fileversion.get()}
 
     entry_name = "Job " + str(len(message_logs) + 1).zfill(4)
     message_logs[entry_name] = {'que_table': ("Waiting", que_url, que_options), 'msg_table': [("Waiting","Entry added to list, waiting for que.")]}
@@ -334,7 +340,7 @@ def exit_app():
 ##           Create the main GUI
 #################################################
 window = tk.Tk()
-window.title("Literotica Downloader")
+window.title("Lit Rip")
 window.geometry("800x600")
 
 #################################################
@@ -346,7 +352,7 @@ frame_main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
 frame_action = tk.Frame(frame_main, width=800, height=50, borderwidth=2, relief="groove")
 frame_action.pack(side=tk.TOP, fill=tk.BOTH, padx=0, pady=0)
 #Que Tree View
-frame_que = tk.Frame(frame_main, width=800, height=100, borderwidth=2, relief="groove")
+frame_que = tk.Frame(frame_main, width=800, height=100)
 frame_que.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
 #Status Messages
 frame_message_log = tk.Frame(window, width=800, height=650)
@@ -360,8 +366,11 @@ action_lbl_url.pack(side=tk.LEFT)
 action_url = tk.Entry(frame_action, width=100)
 action_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-action_get_series = tk.BooleanVar()
-action_get_series_chkbox = ttk.Checkbutton(frame_action, text='Get Whole Series', variable=action_get_series)
+options_save_series = tk.BooleanVar(value=True)         #The default value. User can still uncheck in app.
+options_save_filetype = ".txt"                          #Just adds this extension, does nothing for formatting.
+options_save_fileversion = tk.BooleanVar(value=True)    #Saves the version used to the header of each story.
+
+action_get_series_chkbox = ttk.Checkbutton(frame_action, text='Get Whole Series', variable=options_save_series)
 action_get_series_chkbox.pack(side=tk.LEFT)
 
 action_add_action = tk.Button(frame_action, text="Add", command=que_action)
