@@ -30,4 +30,4 @@ Some Known Issues:
 9. Make code look and act clean
    - (Its dirty. Refer to issue 6)
 10. Can only use direct links to stories, can not use links to the series
-    - (It will error out and save an incorrect file if you dont give it the exact url https://www.literotica.com/s/storyname)
+    - (It will error out and save an incorrect file if you dont give it the exact url ```https://www.literotica.com/s/storyname```)
