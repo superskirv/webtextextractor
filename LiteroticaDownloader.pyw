@@ -6,7 +6,7 @@ import time
 import requests
 import re
 
-file_version = '2023.07.06.A'
+file_version = '2023.07.07.A'
 
 #################################################
 ##           Reqexp Formulas Setup
@@ -90,10 +90,23 @@ class DownloadThread(threading.Thread):
 
         req_start = url
         req_title = ""
-        req_filename = title = url.rsplit("/")[4]
-        self.set_status("Filename", req_filename,0)
-        req_author = ""
         req_series = ""
+        req_filename = url.rsplit("/")[4]
+
+        if options.get("filename", "default") != "default" and options.get("filename") != "series":
+            if options.get("filename") != "series":
+                req_filename = options.get("filename")
+                self.set_status("Processing", "Using Custom Filename " + req_filename,0)
+        else:
+            if url.startswith("https://www.literotica.com/series/se/"):
+                self.set_status("Info", "Series URL used: " + url,0)
+                req_filename = url.rsplit("/")[5]
+                req_series = url
+                series_page = req_filename
+                self.set_status("Information", "(1)Using Series Link as Fallback Filename " + req_filename,0)
+            else:
+                self.set_status("Processing", "Using Filename " + req_filename,0)
+        req_author = ""
         req_links = []
         req_tags = []
 
@@ -102,12 +115,16 @@ class DownloadThread(threading.Thread):
 
         if raw_html != "0":
             if options.get("series", True) is not False:
-                series_page = self.get_pattern(raw_html, regexp_series_page)
-                self.set_status("Processing","Found Series Link: " + series_page,1)
+                if(req_series == ""):
+                    series_page = self.get_pattern(raw_html, regexp_series_page)
+                    self.set_status("Processing","Found Series Link: " + series_page,1)
                 if series_page != "0":
-                    series_html = self.get_html("https://www.literotica.com/series/se/" + series_page)
-                    if series_html != "0":
-                        series_temp = self.get_pattern(series_html, regexp_series_pages_bulk)
+                    req_series = self.get_html("https://www.literotica.com/series/se/" + series_page)
+                    if options.get("filename", "default") == "series":
+                        req_filename = series_page
+                        self.set_status("Information", "(2)Using Series Link as Fallback Filename " + req_filename,0)
+                    if req_series != "0":
+                        series_temp = self.get_pattern(req_series, regexp_series_pages_bulk)
                         if series_temp != "0":
                             req_links = self.get_all_links(series_temp)
                             for link in req_links:
@@ -125,8 +142,24 @@ class DownloadThread(threading.Thread):
 
         for link in req_links:
             raw_html = self.get_html(link)
-
             req_title = self.get_pattern(raw_html, regexp_title)
+
+            if link == req_links[0]:
+                if req_filename != link.rsplit("/")[4]:
+                    if options.get("filename", "default") != "default":
+                        if options.get("filename") != "series":
+                            # Custom Name as file name
+                            req_filename = options.get("filename")
+                            self.set_status("Information", "Using custom Filename " + req_filename,0)
+                        else:
+                            #Series Title as file name
+                            req_filename = req_title
+                            self.set_status("Information", "Using Series title as Filename " + req_filename,0)
+                    else:
+                        #default option, first link name
+                        req_filename = link.rsplit("/")[4]
+                        self.set_status("Information", "Using first story in series as Filename " + req_filename,0)
+
             if req_title == "0":
                 req_title = self.get_pattern(raw_html, regexp_title_alt)
             req_title = self.remove_formatting(req_title) #Fix some formatting.
@@ -277,7 +310,7 @@ def que_action():
     que_url = action_url.get()
     que_options = ''
 
-    que_options = {'job_type': 'download','series': options_save_series.get(), 'save_type': options_save_filetype, 'save_fileversion': options_save_fileversion.get()}
+    que_options = {'job_type': 'download','series': options_save_series.get(), 'save_type': options_save_filetype, 'save_fileversion': options_save_fileversion.get(), 'filename': options_save_filename}
 
     entry_name = "Job " + str(len(message_logs) + 1).zfill(4)
     message_logs[entry_name] = {'que_table': ("Waiting", que_url, que_options), 'msg_table': [("Waiting","Entry added to list, waiting for que.")]}
@@ -369,6 +402,7 @@ action_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
 options_save_series = tk.BooleanVar(value=True)         #The default value. User can still uncheck in app.
 options_save_filetype = ".txt"                          #Just adds this extension, does nothing for formatting.
 options_save_fileversion = tk.BooleanVar(value=True)    #Saves the version used to the header of each story.
+options_save_filename = "default"                        #default file name is first story name in series. You can also use "series" to get the series title, or specify a custom name here.
 
 action_get_series_chkbox = ttk.Checkbutton(frame_action, text='Get Whole Series', variable=options_save_series)
 action_get_series_chkbox.pack(side=tk.LEFT)
