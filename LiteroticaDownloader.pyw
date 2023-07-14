@@ -6,24 +6,25 @@ import time
 import requests
 import re
 
-file_version = '2023.07.07.A'
+file_version = '2023.07.13.A'
 
 #################################################
 ##           Reqexp Formulas Setup
 #################################################
-regexp_title =      r"<h1 class=\"j_bm headline j_eQ\">(.*?)</h1>"
-regexp_title_alt =  r"<h1 class=\"j_bm headline j_eQ \">(.*?)</h1>"
-regexp_series_page = r"\"https://www.literotica.com/series/se/(.*?)\" class=\"bn_av\""
-regexp_series_pages_bulk = r"<ul class=\"series__works\">(.*?)</ul>"
+regexp_title =               r"<h1 class=\"j_bm headline j_eQ\">(.*?)</h1>"
+regexp_title_alt =          r"<h1 class=\"j_bm headline j_eQ \">(.*?)</h1>"
+regexp_series_page =        r"\"https://www.literotica.com/series/se/(.*?)\" class=\"bn_av\""
+regexp_series_pages_bulk =  r"<ul class=\"series__works\">(.*?)</ul>"
+regexp_series_title =       r"<h1 class=\"j_bm headline\">(.*?)</h1>"
 
-regexp_author =     r"class=\"y_eU \" title=\"(.*?)\">" # class="y_eU" title="Ran_dom_Guy">
-regexp_author_alt = r"class=\"y_eU\" title=\"(.*?)\">" # class="y_eR" title="Ran_dom_Guy">
+regexp_author =             r"class=\"y_eU \" title=\"(.*?)\">" # class="y_eU" title="Ran_dom_Guy">
+regexp_author_alt =         r"class=\"y_eU\" title=\"(.*?)\">" # class="y_eR" title="Ran_dom_Guy">
 
-regexp_tag_bulk = r'<div class=\"bn_Q bn_ar\">(.*?)</div>'
+regexp_tag_bulk =           r'<div class=\"bn_Q bn_ar\">(.*?)</div>'
 regexp_tag_single =         r" class=\"av_as av_r\">(.*?)</a>"
 
-regexp_story_page = r"<div class=\"panel article aa_eQ\">(.*?)</div>"
-regexp_next_page = r"title=\"Next Page\" href=\"(.*?)\"><i class=\""
+regexp_story_page =         r"<div class=\"panel article aa_eQ\">(.*?)</div>"
+regexp_next_page =          r"title=\"Next Page\" href=\"(.*?)\"><i class=\""
 
 global message_logs
 message_logs = {}
@@ -44,7 +45,7 @@ class DownloadThread(threading.Thread):
     def set_status(self, status="Error", msg="No Msg", delay=0.5):
         if msg == "No Msg" and status != "Error":
             msg = status
-            status = "Old Format"
+            status = "Error"
 
         self.message_logs[self.item_id]['que_table'] = (status, *self.message_logs[self.item_id]['que_table'][1:])
         self.queued_actions.set(self.que_id, column='action_status', value=status)
@@ -54,7 +55,7 @@ class DownloadThread(threading.Thread):
         time.sleep(delay)
 
     def get_html(self, url, max_retries=2, retry_delay=5):
-        self.set_status("Downloading", url)
+        self.set_status("Downloading", url,1)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
         retries = 0
 
@@ -63,7 +64,7 @@ class DownloadThread(threading.Thread):
                 response = requests.get(url, headers=headers)
                 if response.status_code == 200:
                     raw_html = response.text
-                    self.set_status("Download","Success!")
+                    self.set_status("Download","Success!",1)
                     return(raw_html)
                 else:
                     self.set_status("Netwok Error", self.item_id + ": Network No Status code")
@@ -76,7 +77,7 @@ class DownloadThread(threading.Thread):
         self.set_status("Netwok Error","Max number of retries reached.")
         return("0")
 
-    def get_pattern(self, html, pattern):
+    def get_pattern(self, html, pattern, url="a"):
         if html:
             matches = re.findall(pattern, html, re.DOTALL)
             if matches:
@@ -92,20 +93,26 @@ class DownloadThread(threading.Thread):
         req_title = ""
         req_series = ""
         req_filename = url.rsplit("/")[4]
+        option_filename = options.get("filename", "default")
 
-        if options.get("filename", "default") != "default" and options.get("filename") != "series":
-            if options.get("filename") != "series":
-                req_filename = options.get("filename")
-                self.set_status("Processing", "Using Custom Filename " + req_filename,0)
-        else:
+        if url.startswith("https://www.literotica.com/series/se/"):
+            req_series = url
+            series_page = url.rsplit("/")[5]
+
+        if option_filename == "default":
+            req_filename = url.rsplit("/")[4]
+            self.set_status("DEBUG", "Default filename option set.",0)
+        elif option_filename == "series":
             if url.startswith("https://www.literotica.com/series/se/"):
-                self.set_status("Info", "Series URL used: " + url,0)
-                req_filename = url.rsplit("/")[5]
-                req_series = url
-                series_page = req_filename
-                self.set_status("Information", "(1)Using Series Link as Fallback Filename " + req_filename,0)
+                req_filename = self.get_pattern(url, regexp_series_title)
+                self.set_status("DEBUG", "Series filename option set.",0)
             else:
-                self.set_status("Processing", "Using Filename " + req_filename,0)
+                self.set_status("DEBUG", "Need to find series page to find title",0)
+        else:
+            req_filename = option_filename
+            self.set_status("DEBUG", "Custom filename option set.",0)
+        self.set_status("DEBUG", "Using Filename " + req_filename,0)
+
         req_author = ""
         req_links = []
         req_tags = []
@@ -117,24 +124,27 @@ class DownloadThread(threading.Thread):
             if options.get("series", True) is not False:
                 if(req_series == ""):
                     series_page = self.get_pattern(raw_html, regexp_series_page)
-                    self.set_status("Processing","Found Series Link: " + series_page,1)
+                    self.set_status("Information","Found Series Link: " + series_page,1)
                 if series_page != "0":
                     req_series = self.get_html("https://www.literotica.com/series/se/" + series_page)
-                    if options.get("filename", "default") == "series":
+                    if option_filename == "series":
                         req_filename = series_page
-                        self.set_status("Information", "(2)Using Series Link as Fallback Filename " + req_filename,0)
+                        self.set_status("DEBUG", "(2)Using Series Link as Fallback Filename " + req_filename,0)
                     if req_series != "0":
+                        if option_filename == "series":
+                            req_filename = self.get_pattern(req_series, regexp_series_title)
+                            self.set_status("DEBUG", "Found Series Filename " + req_filename,0)
                         series_temp = self.get_pattern(req_series, regexp_series_pages_bulk)
                         if series_temp != "0":
                             req_links = self.get_all_links(series_temp)
                             for link in req_links:
-                                self.set_status("Found Link",link,0)
+                                self.set_status("Information","Found Link: " + link,0)
                         else:
-                            self.set_status("Failed","No Series Links",1)
+                            self.set_status("Error","No Series Links",1)
                     else:
-                        self.set_status("Failed","No Series Pages",1)
+                        self.set_status("Error","No Series Pages",1)
                 else:
-                    self.set_status("Failed","Not a Series? Falling back to single story mode.",1)
+                    self.set_status("Error","Not a Series? Falling back to single story mode.",1)
                     req_links = [url]
             else:
                 #just look up the one story, by only having 1 link to look up.
@@ -146,19 +156,19 @@ class DownloadThread(threading.Thread):
 
             if link == req_links[0]:
                 if req_filename != link.rsplit("/")[4]:
-                    if options.get("filename", "default") != "default":
-                        if options.get("filename") != "series":
-                            # Custom Name as file name
-                            req_filename = options.get("filename")
-                            self.set_status("Information", "Using custom Filename " + req_filename,0)
+                    if option_filename == "default":
+                        req_filename = link.rsplit("/")[4]
+                        self.set_status("Information", "Using first story url in series as Filename " + req_filename,0)
+                    elif option_filename == "series":
+                        series_title = self.get_pattern(raw_html, regexp_series_title,link)
+                        if series_title == "0":
+                            self.set_status("Information", "Something weird happened. " + req_filename,0)
                         else:
-                            #Series Title as file name
-                            req_filename = req_title
+                            req_filename = series_title
                             self.set_status("Information", "Using Series title as Filename " + req_filename,0)
                     else:
-                        #default option, first link name
-                        req_filename = link.rsplit("/")[4]
-                        self.set_status("Information", "Using first story in series as Filename " + req_filename,0)
+                        req_filename = options.get("filename")
+                        self.set_status("Information", "Using custom Filename " + req_filename,0)
 
             if req_title == "0":
                 req_title = self.get_pattern(raw_html, regexp_title_alt)
@@ -250,6 +260,7 @@ class DownloadThread(threading.Thread):
         html = html.replace("<p>", "\n")
         html = html.replace("</p>", "\n")
         html = html.replace("<br>", "\n")
+        html = html.replace("&amp;", "&")
         html = html.replace("<div class=\"aa_ht\">", "")
         html = html.replace("&#x27;", "\'")
         html = html.replace("&quot;", "\"")
@@ -349,22 +360,30 @@ def display_msg_log(event):
         for item in msg_table_data:
             message_log_grid.insert('', tk.END, values=item)
 
-def open_file():
-    root = tk()
-    root.withdraw()
-
-    directory = filedialog.askdirectory(title='Select Directory')
-    if directory:
-        txt_files = find_txt_files(directory)
-        que_update_job(directory, txt_files) #Runs job to update existing stories.
+def toggle_option_series():
+    global options_save_series
+    if options_save_series == True:
+        options_save_series = False
     else:
-        print("No directory selected.")
+        options_save_series = True
 
-def save_file():
-    file_path = filedialog.asksaveasfilename(defaultextension=".txt")
-    if file_path:
-        # Save the file
-        print("Saved file:", file_path)
+def toggle_option_savefileversion():
+    global options_save_fileversion
+    if options_save_fileversion == True:
+        options_save_fileversion = False
+    else:
+        options_save_fileversion = True
+
+def toggle_option_filename(selected):
+    global options_save_filename
+    if selected == 1:
+        options_save_filename = "default"
+    elif selected == 2:
+        options_save_filename = "series"
+    else:
+        #Disabled for now.
+        options_save_filename = "custom"
+        print("disabled option...")
 
 def exit_app():
     window.quit()
@@ -391,6 +410,37 @@ frame_que.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
 frame_message_log = tk.Frame(window, width=800, height=650)
 frame_message_log.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=0)
 
+options_save_series = tk.BooleanVar(value=True)         #The default value. User can still uncheck in app.
+options_save_filetype = ".txt"                          #Just adds this extension, does nothing for formatting.
+options_save_fileversion = tk.BooleanVar(value=True)    #Saves the version used to the header of each story.
+options_save_filename = "default"                        #default file name is first story name in series. You can also use "series" to get the series title, or specify a custom name here.
+#Visual only variables to show the GUI checkmark
+options_submenu_filename_d = tk.BooleanVar(value=True)
+options_submenu_filename_s = tk.BooleanVar(value=False)
+options_submenu_filename_c = tk.BooleanVar(value=False)
+#################################################
+##           Menu Bar Setup
+#################################################
+menu_bar = tk.Menu(window)
+window.config(menu=menu_bar)
+# Create the File menu
+file_menu = tk.Menu(menu_bar, tearoff=False)
+options_menu = tk.Menu(menu_bar, tearoff=False)
+
+menu_bar.add_cascade(label="Options", menu=options_menu)
+
+options_menu.add_checkbutton(label="Find Series", variable=options_save_series, command=toggle_option_series)
+
+options_submenu_filename = tk.Menu(options_menu, tearoff=0)
+options_submenu_filename.add_radiobutton(label="Default", value="default", command=lambda: toggle_option_filename(1))
+options_submenu_filename.add_radiobutton(label="Series", value="series", command=lambda: toggle_option_filename(2))
+options_submenu_filename.add_radiobutton(label="Custom", value="custom", command=lambda: toggle_option_filename(0))
+options_submenu_filename.entryconfig("Custom", state="disabled")
+options_menu.add_cascade(label="Save Filename as...", menu=options_submenu_filename)
+options_menu.add_command(label="Save File Type [.txt]")
+options_menu.entryconfig("Save File Type \[.txt\]", state="disabled")
+options_menu.add_checkbutton(label="Save Lit-Rip Version", variable=options_save_fileversion, command=toggle_option_savefileversion)
+
 #################################################
 ##           Actions Setup
 #################################################
@@ -398,11 +448,6 @@ action_lbl_url = tk.Label(frame_action, text="URL: ")
 action_lbl_url.pack(side=tk.LEFT)
 action_url = tk.Entry(frame_action, width=100)
 action_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-options_save_series = tk.BooleanVar(value=True)         #The default value. User can still uncheck in app.
-options_save_filetype = ".txt"                          #Just adds this extension, does nothing for formatting.
-options_save_fileversion = tk.BooleanVar(value=True)    #Saves the version used to the header of each story.
-options_save_filename = "default"                        #default file name is first story name in series. You can also use "series" to get the series title, or specify a custom name here.
 
 action_get_series_chkbox = ttk.Checkbutton(frame_action, text='Get Whole Series', variable=options_save_series)
 action_get_series_chkbox.pack(side=tk.LEFT)
@@ -426,7 +471,7 @@ queued_actions.heading("action_url", text="URL")
 queued_actions.heading("action_options", text="Options")
 
 queued_actions.column("action_status", width=70)
-queued_actions.column("action_url", width=300)
+queued_actions.column("action_url", width=200)
 queued_actions.column("action_options", width=200)
 
 queued_actions.grid(row=1, column=0, columnspan=4, sticky="nsew")
